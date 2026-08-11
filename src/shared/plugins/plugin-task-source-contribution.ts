@@ -19,10 +19,21 @@ export const PLUGIN_TASK_CONNECTION_FIELD_LIMIT = 12
 export const PLUGIN_TASK_CONNECTION_FIELD_KINDS = ['text', 'url', 'password'] as const
 export type PluginTaskConnectionFieldKind = (typeof PLUGIN_TASK_CONNECTION_FIELD_KINDS)[number]
 
+// Why: a field key becomes a settings/secret key, not an id slug, so the
+// kebab-case id grammar would needlessly reject the camelCase convention used
+// everywhere else for config. Prototype-poisoning names stay excluded.
+const RESERVED_FIELD_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
+const connectionFieldKeySchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z][A-Za-z0-9_-]*$/, 'must start with a letter and use letters, digits, - or _')
+  .refine((key) => !RESERVED_FIELD_KEYS.has(key), 'reserved key')
+
 export const pluginTaskConnectionFieldSchema = z
   .object({
     /** Stored verbatim as the settings/secret key for this field. */
-    key: pluginIdSchema,
+    key: connectionFieldKeySchema,
     label: z.string().min(1).max(256),
     kind: z.enum(PLUGIN_TASK_CONNECTION_FIELD_KINDS),
     required: z.boolean().default(true),

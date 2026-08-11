@@ -93,6 +93,33 @@ export const PLUGIN_TASK_SOURCE_METHODS: readonly PluginTaskSourceMethodSpec[] =
     result: z.object({ connections: z.array(pluginTaskConnectionSchema).max(64) }).strict()
   }),
   spec({
+    // Why: the host renders the connect form from `connectionFields` but does
+    // not persist its values — it hands them here so the plugin can split
+    // non-secret fields into its settings and credentials into its own vault.
+    // Values are never echoed back to the renderer.
+    name: 'connections.upsert',
+    since: '1.1',
+    feature: null,
+    mutation: true,
+    params: z
+      .object({
+        /** Absent when adding; present when editing an existing connection. */
+        connectionId: z.string().min(1).max(256).optional(),
+        label: z.string().min(1).max(1024),
+        values: z.record(z.string().min(1).max(256), z.string().max(64 * 1024))
+      })
+      .strict(),
+    result: z.object({ connection: pluginTaskConnectionSchema }).strict()
+  }),
+  spec({
+    name: 'connections.delete',
+    since: '1.1',
+    feature: null,
+    mutation: true,
+    params: connectionScopedParams,
+    result: z.object({ ok: z.literal(true) }).strict()
+  }),
+  spec({
     name: 'scopes.list',
     since: '1.1',
     feature: null,

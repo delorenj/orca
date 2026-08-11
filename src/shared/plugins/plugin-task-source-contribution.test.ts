@@ -18,8 +18,8 @@ const source = {
   title: 'Plane',
   features: ['comments'],
   connectionFields: [
-    { key: 'base-url', label: 'API base URL', kind: 'url' },
-    { key: 'api-key', label: 'API key', kind: 'password' }
+    { key: 'baseUrl', label: 'API base URL', kind: 'url' },
+    { key: 'apiKey', label: 'API key', kind: 'password' }
   ]
 }
 
@@ -80,6 +80,26 @@ describe('taskSources contribution', () => {
 
     expect(parsed).toMatchObject({ ok: false })
     expect(parsed.ok ? '' : parsed.error).toContain('duplicate connection field key')
+  })
+
+  // Field keys become settings/secret keys, so camelCase must be accepted
+  // while prototype-poisoning names stay rejected.
+  it.each(['baseUrl', 'workspace_slug', 'api-key', 'Token2'])('accepts the field key %s', (key) => {
+    const fields = [{ key, label: 'Value', kind: 'password' }]
+    const parsed = parsePluginManifest(
+      manifest({ contributes: { taskSources: [{ ...source, connectionFields: fields }] } })
+    )
+
+    expect(parsed).toMatchObject({ ok: true })
+  })
+
+  it.each(['__proto__', 'constructor', '2fa', 'has space'])('rejects the field key %s', (key) => {
+    const fields = [{ key, label: 'Value', kind: 'password' }]
+    const parsed = parsePluginManifest(
+      manifest({ contributes: { taskSources: [{ ...source, connectionFields: fields }] } })
+    )
+
+    expect(parsed).toMatchObject({ ok: false })
   })
 
   it('requires at least one connection field', () => {
