@@ -48,7 +48,9 @@ async function plugin(): Promise<ValidDiscoveredPlugin> {
 function worker(commands: string[]): PluginWorkerHandle & { dispose: ReturnType<typeof vi.fn> } {
   return {
     commands,
+    taskSources: [],
     invokeCommand: vi.fn(async () => null),
+    invokeExtension: vi.fn(async () => null),
     deliverEvent: vi.fn(),
     lastActivityAt: () => Date.now(),
     inFlightCount: () => 0,
@@ -71,6 +73,7 @@ function controller(options: {
     capabilities: () => (options.isApproved() ? [] : null),
     isCurrentApproved: () => options.isApproved(),
     invokeCommand: vi.fn(async () => null),
+    invokeTaskSource: vi.fn(async () => null),
     executeHostCall: vi.fn(async () => ({ ok: true as const, value: null })),
     log: vi.fn(),
     onStateChanged: vi.fn(),

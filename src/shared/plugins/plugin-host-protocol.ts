@@ -1,6 +1,9 @@
 import { z } from 'zod'
 import { PLUGIN_COMMAND_LIMIT, PLUGIN_EVENT_NAMES, pluginCommandIdSchema } from './plugin-manifest'
 import { PLUGIN_CAPABILITY_KINDS } from './plugin-capabilities'
+import { PLUGIN_ID_MAX_LENGTH } from './plugin-manifest-fields'
+import { PLUGIN_EXTENSION_POINT_KEYS } from './plugin-extension-registry'
+import { PLUGIN_TASK_SOURCE_LIMIT } from './plugin-task-source-contribution'
 
 /**
  * Message protocol between the Orca process and the out-of-process plugin
@@ -42,11 +45,27 @@ export const pluginWorkerHostResultSchema = z.object({
   error: z.string().optional()
 })
 
+/**
+ * Host→plugin call into a registered extension implementation. Deliberately
+ * not `invokeCommand`: commands are manifest-declared and user-invocable from
+ * the palette and keybindings, and extension methods must be neither.
+ */
+export const pluginWorkerInvokeExtensionSchema = z.object({
+  type: z.literal('invokeExtension'),
+  callId: z.number().int().nonnegative(),
+  point: z.enum(PLUGIN_EXTENSION_POINT_KEYS),
+  /** Contribution id within the plugin (`taskSources[].id`). */
+  providerId: z.string().min(1).max(PLUGIN_ID_MAX_LENGTH),
+  method: z.string().min(1).max(128),
+  args: z.unknown().optional()
+})
+
 export const pluginWorkerShutdownSchema = z.object({ type: z.literal('shutdown') })
 
 export const pluginWorkerParentMessageSchema = z.discriminatedUnion('type', [
   pluginWorkerInitSchema,
   pluginWorkerInvokeCommandSchema,
+  pluginWorkerInvokeExtensionSchema,
   pluginWorkerDeliverEventSchema,
   pluginWorkerHostResultSchema,
   pluginWorkerShutdownSchema
@@ -55,7 +74,14 @@ export const pluginWorkerParentMessageSchema = z.discriminatedUnion('type', [
 export const pluginWorkerReadySchema = z.object({
   type: z.literal('ready'),
   /** Command ids the worker registered handlers for (⊆ manifest commands). */
-  commands: z.array(pluginCommandIdSchema).max(PLUGIN_COMMAND_LIMIT)
+  commands: z.array(pluginCommandIdSchema).max(PLUGIN_COMMAND_LIMIT),
+  /** Task-source ids the worker registered implementations for. Reported so a
+   *  source declared in the manifest but never registered fails loudly at
+   *  activation instead of on the user's first query. */
+  taskSources: z
+    .array(z.string().min(1).max(PLUGIN_ID_MAX_LENGTH))
+    .max(PLUGIN_TASK_SOURCE_LIMIT)
+    .default([])
 })
 
 export const pluginWorkerCommandResultSchema = z.object({
@@ -71,6 +97,17 @@ export const pluginWorkerCommandResultSchema = z.object({
 export const pluginWorkerEventAckSchema = z.object({
   type: z.literal('eventAck'),
   eventId: z.number().int().nonnegative()
+})
+
+export const pluginWorkerExtensionResultSchema = z.object({
+  type: z.literal('extensionResult'),
+  callId: z.number().int().nonnegative(),
+  ok: z.boolean(),
+  // Why: opaque here for the same reason as commandResult — it crosses fork
+  // IPC as structured-clone data; the host validates it against the method's
+  // result schema before anything downstream sees it.
+  value: z.unknown().optional(),
+  error: z.string().max(8192).optional()
 })
 
 /** Worker→host API call (the plugin SDK's transport for host methods). */
@@ -95,6 +132,7 @@ export const pluginWorkerFatalSchema = z.object({
 export const pluginWorkerChildMessageSchema = z.discriminatedUnion('type', [
   pluginWorkerReadySchema,
   pluginWorkerCommandResultSchema,
+  pluginWorkerExtensionResultSchema,
   pluginWorkerEventAckSchema,
   pluginWorkerHostCallSchema,
   pluginWorkerLogSchema,

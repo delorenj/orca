@@ -36,7 +36,8 @@ import { PluginContentPackRegistry } from './plugin-content-pack-registry'
 import type { PluginServiceOptions } from './plugin-service-options'
 import type { PluginChangeEvent } from '../../shared/plugins/plugin-change-event'
 import { waitForPluginRefreshSettlement } from './plugin-refresh-settlement'
-import { assertPluginWorkerCommand } from './plugin-command-invocation'
+import { invokePluginWorkerCommand } from './plugin-command-invocation'
+import { PluginTaskSourceController } from './plugin-task-source-service'
 import { deliverPluginEvent } from './plugin-event-delivery'
 
 export type { PluginRuntimeDelegate } from './plugin-host-service-bindings'
@@ -53,6 +54,7 @@ export class PluginService {
   private readonly contentVerifier = new PluginContentVerifier()
   readonly contentPacks: PluginContentPackRegistry
   readonly panels: PluginPanelController
+  readonly taskSources: PluginTaskSourceController
   private readonly changeListeners = new Set<(event: PluginChangeEvent) => void>()
   private readonly housekeeping = new PluginServiceHousekeeping()
   private discovered: DiscoveredPlugin[] = []
@@ -69,14 +71,17 @@ export class PluginService {
     )
     this.audit = new PluginAuditLog(getPluginsDataDir(options.userDataPath))
     this.panels = new PluginPanelController({
-      resolveApprovedPlugin: (pluginKey) => {
-        const plugin = this.findValidPlugin(pluginKey)
-        return plugin && this.isRuntimeApproved(plugin) ? plugin : null
-      },
+      resolveApprovedPlugin: this.approvedPlugin,
       contentVerifier: this.contentVerifier,
       executeHostCall: (pluginKey, method, params) =>
         this.executeHostCall(pluginKey, method, params, { viaPanel: true }),
       log: (pluginKey, line) => this.logBuffer.append(pluginKey, 'error', line)
+    })
+    this.taskSources = new PluginTaskSourceController({
+      plugins: () => this.discovered,
+      resolveApprovedPlugin: this.approvedPlugin,
+      ensureWorker: (plugin) => this.workerController.ensure(plugin),
+      audit: this.audit
     })
     this.workerController = new PluginWorkerController({
       entryPath: options.hostEntryPath ?? '',
@@ -86,9 +91,10 @@ export class PluginService {
       registry: this.registry,
       contentVerifier: this.contentVerifier,
       capabilities: (pluginKey) => this.getGrantedCapabilities(pluginKey),
-      isCurrentApproved: (plugin) =>
-        this.findValidPlugin(plugin.pluginKey) === plugin && this.isRuntimeApproved(plugin),
+      isCurrentApproved: (plugin) => this.approvedPlugin(plugin.pluginKey) === plugin,
       invokeCommand: (pluginKey, commandId, args) => this.invokeCommand(pluginKey, commandId, args),
+      invokeTaskSource: (pluginKey, sourceId, method, args) =>
+        this.taskSources.invoke(pluginKey, sourceId, method, args),
       executeHostCall: (pluginKey, method, params) =>
         this.executeHostCall(pluginKey, method, params, { viaPanel: false }),
       log: (pluginKey, level, line) => this.logBuffer.append(pluginKey, level, line),
@@ -213,6 +219,13 @@ export class PluginService {
     })
   }
 
+  /** Shared by every controller that must fail closed on an unapproved
+   *  plugin; an arrow field so it can be passed by reference. */
+  private readonly approvedPlugin = (pluginKey: string): ValidDiscoveredPlugin | null => {
+    const plugin = this.findValidPlugin(pluginKey)
+    return plugin && this.isRuntimeApproved(plugin) ? plugin : null
+  }
+
   private isRuntimeApproved(plugin: ValidDiscoveredPlugin): boolean {
     return (
       this.contentPacksReady &&
@@ -238,11 +251,8 @@ export class PluginService {
   /** Consented capability kinds for an approved plugin; null otherwise so
    *  callers deny uniformly (no probe-able distinction). */
   getGrantedCapabilities(pluginKey: string): PluginCapabilityKind[] | null {
-    const plugin = this.findValidPlugin(pluginKey)
-    if (!plugin || !this.isRuntimeApproved(plugin)) {
-      return null
-    }
-    return capabilityKinds(plugin.manifest.capabilities)
+    const plugin = this.approvedPlugin(pluginKey)
+    return plugin ? capabilityKinds(plugin.manifest.capabilities) : null
   }
 
   /** Host API chokepoint for both transports (worker fork IPC + panel
@@ -272,25 +282,19 @@ export class PluginService {
   }
 
   async invokeCommand(pluginKey: string, commandId: string, args?: unknown): Promise<unknown> {
-    const plugin = this.findValidPlugin(pluginKey)
-    if (!plugin || !this.isRuntimeApproved(plugin)) {
-      throw new Error(`plugin ${pluginKey} is not enabled`)
-    }
-    assertPluginWorkerCommand(plugin, commandId)
-    const handle = await this.workerController.ensure(plugin)
-    if (!handle.commands.includes(commandId)) {
-      throw new Error(`plugin ${pluginKey} registered no handler for ${commandId}`)
-    }
-    return handle.invokeCommand(commandId, args)
+    return invokePluginWorkerCommand({
+      plugin: this.approvedPlugin(pluginKey),
+      commandId,
+      args,
+      ensureWorker: (plugin) => this.workerController.ensure(plugin)
+    })
   }
 
   emitEvent(event: PluginEventName, payload: unknown): void {
-    if (!this.options.isPluginSystemEnabled() || this.disposed) {
-      return
-    }
     deliverPluginEvent({
       event,
       payload,
+      enabled: this.options.isPluginSystemEnabled() && !this.disposed,
       plugins: this.discovered,
       eventBus: this.eventBus,
       workerController: this.workerController,

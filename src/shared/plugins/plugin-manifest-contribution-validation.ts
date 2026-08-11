@@ -15,6 +15,9 @@ type ContributionValidationManifest = {
     keybindings: { command: string; key: string; when?: 'global' | 'worktree' }[]
     vmRecipes: PathContribution[]
     agents: PathContribution[]
+    taskSources: (IdentifiedContribution & {
+      connectionFields: { key: string; kind: string }[]
+    })[]
   }
   capabilities: { kind: string }[]
 }
@@ -44,7 +47,7 @@ export function validatePluginManifestContributions(
   manifest: ContributionValidationManifest,
   ctx: RefinementCtx
 ): void {
-  for (const path of ['panels', 'commands'] as const) {
+  for (const path of ['panels', 'commands', 'taskSources'] as const) {
     rejectDuplicateValues(
       manifest.contributes[path],
       (entry) => (entry as IdentifiedContribution).id,
@@ -140,5 +143,55 @@ export function validatePluginManifestContributions(
       path: ['capabilities'],
       message: 'events:subscribe capability required when contributes.events is non-empty'
     })
+  }
+  validateTaskSourceContributions(manifest, ctx)
+}
+
+function validateTaskSourceContributions(
+  manifest: ContributionValidationManifest,
+  ctx: RefinementCtx
+): void {
+  const taskSources = manifest.contributes.taskSources
+  if (taskSources.length === 0) {
+    return
+  }
+  // A task source is answered entirely by worker code; there is no declarative
+  // form of it, so a manifest without `main` could never serve one.
+  if (!manifest.main) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['main'],
+      message: 'required when contributes.taskSources is non-empty'
+    })
+  }
+  const hasCapability = (kind: string): boolean =>
+    manifest.capabilities.some((capability) => capability.kind === kind)
+  if (!hasCapability('tasks:provide')) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['capabilities'],
+      message: 'tasks:provide capability required when contributes.taskSources is non-empty'
+    })
+  }
+  for (const [index, source] of taskSources.entries()) {
+    rejectDuplicateValues(
+      source.connectionFields,
+      (entry) => (entry as { key: string }).key,
+      `taskSources.${index}.connectionFields`,
+      'connection field key',
+      ctx
+    )
+    // Credentials must land in the encrypted vault, so declaring a secret
+    // field without the capability would fail only at connect time.
+    if (
+      source.connectionFields.some((field) => field.kind === 'password') &&
+      !hasCapability('secrets')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['capabilities'],
+        message: 'secrets capability required for a password connection field'
+      })
+    }
   }
 }

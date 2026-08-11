@@ -11,6 +11,10 @@ import {
   pluginVmRecipeContributionSchema
 } from './plugin-content-pack-contributions'
 import {
+  PLUGIN_TASK_SOURCE_LIMIT,
+  pluginTaskSourceContributionSchema
+} from './plugin-task-source-contribution'
+import {
   isPluginManifestId,
   isSafePluginId,
   pluginCommandIdSchema,
@@ -116,6 +120,10 @@ export const pluginManifestSchema = z
         agents: z
           .array(pluginAgentProfileContributionSchema)
           .max(PLUGIN_AGENT_PROFILE_LIMIT)
+          .default([]),
+        taskSources: z
+          .array(pluginTaskSourceContributionSchema)
+          .max(PLUGIN_TASK_SOURCE_LIMIT)
           .default([])
       })
       .strict()
@@ -126,7 +134,8 @@ export const pluginManifestSchema = z
         languagePacks: [],
         keybindings: [],
         vmRecipes: [],
-        agents: []
+        agents: [],
+        taskSources: []
       })),
     capabilities: z.array(pluginCapabilitySchema).max(32).default([])
   })

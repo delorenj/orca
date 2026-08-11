@@ -3,6 +3,7 @@ import type { PluginEventName } from '../../shared/plugins/plugin-manifest'
 import type { PluginPanelActionOutcome } from '../../shared/plugins/plugin-panel-bridge'
 import {
   PLUGIN_COMMAND_EXTENSION_POINT,
+  PLUGIN_TASK_SOURCE_EXTENSION_POINT,
   type PluginExtensionRegistry
 } from '../../shared/plugins/plugin-extension-registry'
 import type { ValidDiscoveredPlugin } from './plugin-discovery'
@@ -27,6 +28,12 @@ export type PluginWorkerControllerOptions = {
   capabilities: (pluginKey: string) => readonly PluginCapabilityKind[] | null
   isCurrentApproved: (plugin: ValidDiscoveredPlugin) => boolean
   invokeCommand: (pluginKey: string, commandId: string, args: unknown) => Promise<unknown>
+  invokeTaskSource: (
+    pluginKey: string,
+    sourceId: string,
+    method: string,
+    args: unknown
+  ) => Promise<unknown>
   executeHostCall: (
     pluginKey: string,
     method: string,
@@ -98,7 +105,7 @@ export class PluginWorkerController {
         )
       }
       this.activationErrors.delete(plugin.pluginKey)
-      this.registerCommands(plugin, spec, handle.commands)
+      this.registerContributions(plugin, spec, handle)
       return handle
     } catch (error) {
       this.activationErrors.set(
@@ -149,13 +156,13 @@ export class PluginWorkerController {
     return this.manager.disposeAll()
   }
 
-  private registerCommands(
+  private registerContributions(
     plugin: ValidDiscoveredPlugin,
     spec: PluginWorkerSpawnSpec,
-    commands: readonly string[]
+    handle: PluginWorkerHandle
   ): void {
     this.options.registry.clearPlugin(plugin.pluginKey)
-    for (const commandId of commands) {
+    for (const commandId of handle.commands) {
       this.options.registry.register(
         PLUGIN_COMMAND_EXTENSION_POINT,
         plugin.pluginKey,
@@ -164,6 +171,29 @@ export class PluginWorkerController {
           invoke: (args) => this.options.invokeCommand(plugin.pluginKey, commandId, args)
         },
         commandId
+      )
+    }
+    // Only sources the worker actually registered: a manifest entry with no
+    // implementation must not present the user a source that cannot answer.
+    const declared = new Set(plugin.manifest.contributes.taskSources.map((source) => source.id))
+    for (const sourceId of handle.taskSources) {
+      if (!declared.has(sourceId)) {
+        this.options.log(
+          plugin.pluginKey,
+          'warn',
+          `ignoring task source ${sourceId}: not declared in the manifest`
+        )
+        continue
+      }
+      this.options.registry.register(
+        PLUGIN_TASK_SOURCE_EXTENSION_POINT,
+        plugin.pluginKey,
+        {
+          sourceId,
+          invoke: (method, args) =>
+            this.options.invokeTaskSource(plugin.pluginKey, sourceId, method, args)
+        },
+        sourceId
       )
     }
     this.registeredSpecs.set(plugin.pluginKey, spec)

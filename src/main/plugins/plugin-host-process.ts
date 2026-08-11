@@ -8,10 +8,12 @@ import {
   type PluginWorkerParentMessage
 } from '../../shared/plugins/plugin-host-protocol'
 import type { PluginCapabilityKind } from '../../shared/plugins/plugin-capabilities'
+import type { PluginExtensionPointKey } from '../../shared/plugins/plugin-extension-registry'
 import type { PluginEventName } from '../../shared/plugins/plugin-manifest'
 import type { PluginPanelActionOutcome } from '../../shared/plugins/plugin-panel-bridge'
 import { buildPluginWorkerEnv } from './plugin-worker-env'
 import { pipePluginWorkerOutput } from './plugin-worker-output-buffer'
+import { createPluginWorkerPendingCalls } from './plugin-worker-pending-calls'
 
 // Grace between the shutdown message and SIGKILL: long enough for plugin
 // cleanup, short enough that disable/quit never feels stuck.
@@ -31,7 +33,15 @@ export type PluginWorkerHostCallExecutor = (
 export type PluginWorkerHandle = {
   /** Command ids the worker registered on activate (⊆ manifest commands). */
   commands: readonly string[]
+  /** Task-source ids the worker registered on activate. */
+  taskSources: readonly string[]
   invokeCommand(commandId: string, args?: unknown): Promise<unknown>
+  invokeExtension(
+    point: PluginExtensionPointKey,
+    providerId: string,
+    method: string,
+    args?: unknown
+  ): Promise<unknown>
   deliverEvent(event: PluginEventName, payload: unknown): void
   /** Milliseconds timestamp of the last completed work (for idle reap). */
   lastActivityAt(): number
@@ -70,12 +80,6 @@ export function resolvePluginHostEntryPath(appPath: string, isPackaged: boolean)
   return join(basePath, 'out', 'main', 'plugin-host-entry.js')
 }
 
-type PendingCall = {
-  resolve: (value: unknown) => void
-  reject: (error: Error) => void
-  timer: ReturnType<typeof setTimeout>
-}
-
 export async function startPluginWorker(
   options: StartPluginWorkerOptions
 ): Promise<PluginWorkerHandle> {
@@ -101,10 +105,10 @@ export async function startPluginWorker(
   pipePluginWorkerOutput(child.stdout, 'info', log)
   pipePluginWorkerOutput(child.stderr, 'error', log)
 
-  const pendingCommands = new Map<number, PendingCall>()
+  const pendingCommands = createPluginWorkerPendingCalls()
+  const pendingExtensionCalls = createPluginWorkerPendingCalls()
   const pendingEvents = new Map<number, ReturnType<typeof setTimeout>>()
   const exitCallbacks: ((code: number | null) => void)[] = []
-  let nextCallId = 0
   let nextEventId = 0
   let exited = false
   let exitCode: number | null = null
@@ -118,11 +122,8 @@ export async function startPluginWorker(
   }
 
   function rejectAllPending(reason: string): void {
-    for (const [callId, entry] of pendingCommands) {
-      clearTimeout(entry.timer)
-      pendingCommands.delete(callId)
-      entry.reject(new Error(reason))
-    }
+    pendingCommands.rejectAll(reason)
+    pendingExtensionCalls.rejectAll(reason)
     for (const timer of pendingEvents.values()) {
       clearTimeout(timer)
     }
@@ -146,133 +147,144 @@ export async function startPluginWorker(
     }
   })
 
-  const commands = await new Promise<string[]>((resolve, reject) => {
-    let settled = false
-    const timer = setTimeout(() => {
-      fail(new Error(`${tag} worker did not become ready within ${readyTimeoutMs}ms`))
-      child.kill('SIGKILL')
-    }, readyTimeoutMs)
-    function fail(error: Error): void {
-      if (!settled) {
-        settled = true
-        clearTimeout(timer)
-        options.signal?.removeEventListener('abort', onAbort)
-        reject(error)
+  const ready = await new Promise<{ commands: string[]; taskSources: string[] }>(
+    (resolve, reject) => {
+      let settled = false
+      const timer = setTimeout(() => {
+        fail(new Error(`${tag} worker did not become ready within ${readyTimeoutMs}ms`))
+        child.kill('SIGKILL')
+      }, readyTimeoutMs)
+      function fail(error: Error): void {
+        if (!settled) {
+          settled = true
+          clearTimeout(timer)
+          options.signal?.removeEventListener('abort', onAbort)
+          reject(error)
+        }
       }
-    }
-    const onAbort = (): void => {
-      fail(new Error(`${tag} worker startup was cancelled`))
-      child.kill('SIGKILL')
-    }
-    options.signal?.addEventListener('abort', onAbort, { once: true })
-    child.on('error', (error) => {
-      const failure = new Error(`${tag} worker process error: ${error.message}`)
-      fail(failure)
-      child.kill('SIGKILL')
-      // Why: fail() no-ops once ready; a post-ready channel fault must still
-      // reject in-flight calls instead of letting each hit its own timeout.
-      rejectAllPending(failure.message)
-    })
-    child.on('exit', (code) => fail(new Error(`${tag} worker exited before ready (code ${code})`)))
-    child.on('message', (raw) => {
-      const parsed = pluginWorkerChildMessageSchema.safeParse(raw)
-      if (!parsed.success) {
-        log('warn', 'ignoring malformed worker message')
-        return
+      const onAbort = (): void => {
+        fail(new Error(`${tag} worker startup was cancelled`))
+        child.kill('SIGKILL')
       }
-      const message = parsed.data
-      switch (message.type) {
-        case 'ready': {
-          if (!settled) {
-            settled = true
-            clearTimeout(timer)
-            options.signal?.removeEventListener('abort', onAbort)
-            resolve(message.commands)
-          }
+      options.signal?.addEventListener('abort', onAbort, { once: true })
+      child.on('error', (error) => {
+        const failure = new Error(`${tag} worker process error: ${error.message}`)
+        fail(failure)
+        child.kill('SIGKILL')
+        // Why: fail() no-ops once ready; a post-ready channel fault must still
+        // reject in-flight calls instead of letting each hit its own timeout.
+        rejectAllPending(failure.message)
+      })
+      child.on('exit', (code) =>
+        fail(new Error(`${tag} worker exited before ready (code ${code})`))
+      )
+      child.on('message', (raw) => {
+        const parsed = pluginWorkerChildMessageSchema.safeParse(raw)
+        if (!parsed.success) {
+          log('warn', 'ignoring malformed worker message')
           return
         }
-        case 'commandResult': {
-          const entry = pendingCommands.get(message.callId)
-          if (!entry) {
+        const message = parsed.data
+        switch (message.type) {
+          case 'ready': {
+            if (!settled) {
+              settled = true
+              clearTimeout(timer)
+              options.signal?.removeEventListener('abort', onAbort)
+              resolve({ commands: message.commands, taskSources: message.taskSources })
+            }
             return
           }
-          clearTimeout(entry.timer)
-          pendingCommands.delete(message.callId)
-          lastActivityAt = Date.now()
-          if (message.ok) {
-            entry.resolve(message.value)
-          } else {
-            entry.reject(new Error(message.error ?? 'plugin command failed'))
+          case 'commandResult': {
+            if (pendingCommands.settle(message.callId, message, 'plugin command failed')) {
+              lastActivityAt = Date.now()
+            }
+            return
           }
-          return
-        }
-        case 'eventAck': {
-          const timer = pendingEvents.get(message.eventId)
-          if (timer) {
-            clearTimeout(timer)
-            pendingEvents.delete(message.eventId)
+          case 'extensionResult': {
+            if (
+              pendingExtensionCalls.settle(message.callId, message, 'plugin extension call failed')
+            ) {
+              lastActivityAt = Date.now()
+            }
+            return
           }
-          lastActivityAt = Date.now()
-          return
-        }
-        case 'hostCall': {
-          lastActivityAt = Date.now()
-          // Host API calls from the worker: gate + execute in main, then
-          // relay the outcome. Never throws — errors become outcomes.
-          void options.executeHostCall(message.method, message.params).then((outcome) => {
+          case 'eventAck': {
+            const timer = pendingEvents.get(message.eventId)
+            if (timer) {
+              clearTimeout(timer)
+              pendingEvents.delete(message.eventId)
+            }
             lastActivityAt = Date.now()
-            sendToChild(
-              outcome.ok
-                ? { type: 'hostResult', callId: message.callId, ok: true, value: outcome.value }
-                : {
-                    type: 'hostResult',
-                    callId: message.callId,
-                    ok: false,
-                    errorCode: outcome.code,
-                    error: outcome.error
-                  }
-            )
-          })
-          return
+            return
+          }
+          case 'hostCall': {
+            lastActivityAt = Date.now()
+            // Host API calls from the worker: gate + execute in main, then
+            // relay the outcome. Never throws — errors become outcomes.
+            void options.executeHostCall(message.method, message.params).then((outcome) => {
+              lastActivityAt = Date.now()
+              sendToChild(
+                outcome.ok
+                  ? { type: 'hostResult', callId: message.callId, ok: true, value: outcome.value }
+                  : {
+                      type: 'hostResult',
+                      callId: message.callId,
+                      ok: false,
+                      errorCode: outcome.code,
+                      error: outcome.error
+                    }
+              )
+            })
+            return
+          }
+          case 'log': {
+            log(message.level, message.message)
+            return
+          }
+          case 'fatal': {
+            fail(new Error(`${tag} worker crashed: ${message.error}`))
+            rejectAllPending(`${tag} worker crashed: ${message.error}`)
+            child.kill('SIGKILL')
+          }
         }
-        case 'log': {
-          log(message.level, message.message)
-          return
-        }
-        case 'fatal': {
-          fail(new Error(`${tag} worker crashed: ${message.error}`))
-          rejectAllPending(`${tag} worker crashed: ${message.error}`)
-          child.kill('SIGKILL')
-        }
+      })
+      sendToChild({
+        type: 'init',
+        pluginId,
+        pluginRoot: rootDir,
+        mainEntry,
+        grantedCapabilities: [...options.grantedCapabilities]
+      })
+      if (options.signal?.aborted) {
+        onAbort()
       }
-    })
-    sendToChild({
-      type: 'init',
-      pluginId,
-      pluginRoot: rootDir,
-      mainEntry,
-      grantedCapabilities: [...options.grantedCapabilities]
-    })
-    if (options.signal?.aborted) {
-      onAbort()
     }
-  })
+  )
 
   return {
-    commands,
+    commands: ready.commands,
+    taskSources: ready.taskSources,
     invokeCommand(commandId, args) {
       if (exited || disposed) {
         return Promise.reject(new Error(`${tag} worker is not running`))
       }
-      const callId = nextCallId++
-      return new Promise<unknown>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pendingCommands.delete(callId)
-          reject(new Error(`${tag} ${commandId} timed out after ${invokeTimeoutMs}ms`))
-        }, invokeTimeoutMs)
-        pendingCommands.set(callId, { resolve, reject, timer })
-        sendToChild({ type: 'invokeCommand', callId, commandId, args })
-      })
+      return pendingCommands.track(
+        invokeTimeoutMs,
+        () => `${tag} ${commandId} timed out after ${invokeTimeoutMs}ms`,
+        (callId) => sendToChild({ type: 'invokeCommand', callId, commandId, args })
+      )
+    },
+    invokeExtension(point, providerId, method, args) {
+      if (exited || disposed) {
+        return Promise.reject(new Error(`${tag} worker is not running`))
+      }
+      return pendingExtensionCalls.track(
+        invokeTimeoutMs,
+        () => `${tag} ${providerId}.${method} timed out after ${invokeTimeoutMs}ms`,
+        (callId) =>
+          sendToChild({ type: 'invokeExtension', callId, point, providerId, method, args })
+      )
     },
     deliverEvent(event, payload) {
       if (exited || disposed) {
@@ -294,7 +306,7 @@ export async function startPluginWorker(
       sendToChild({ type: 'deliverEvent', eventId, event, payload })
     },
     lastActivityAt: () => lastActivityAt,
-    inFlightCount: () => pendingCommands.size + pendingEvents.size,
+    inFlightCount: () => pendingCommands.size() + pendingExtensionCalls.size() + pendingEvents.size,
     async dispose() {
       if (disposed) {
         return

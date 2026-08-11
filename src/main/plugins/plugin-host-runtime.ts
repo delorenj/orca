@@ -15,6 +15,14 @@ import type { PluginEventName } from '../../shared/plugins/plugin-manifest'
 
 export type PluginHostCallError = Error & { code?: string }
 
+/** Method bag a plugin registers per task source. Untyped by design at this
+ *  boundary: the contract lives in the shared method table, and both params
+ *  and results are schema-checked in the host. */
+export type PluginTaskSourceImplementation = Record<
+  string,
+  ((args: unknown) => unknown | Promise<unknown>) | undefined
+>
+
 /** API surface handed to a plugin's `activate(orca)` export. Everything is
  *  EXPERIMENTAL until pluginApi v1 freezes. */
 export type PluginWorkerOrcaApi = {
@@ -25,6 +33,12 @@ export type PluginWorkerOrcaApi = {
   /** Handle an event the manifest subscribed to (`contributes.events`). */
   events: {
     on(event: PluginEventName, handler: (payload: unknown) => void | Promise<void>): void
+  }
+  /** Implement a task source declared in `contributes.taskSources`. Methods
+   *  are named by the task-source method table; the host validates params on
+   *  the way in and results on the way out. */
+  taskSources: {
+    register(sourceId: string, implementation: PluginTaskSourceImplementation): void
   }
   /** Call a host API method (capability-gated host-side). */
   host: {
@@ -57,6 +71,7 @@ export function createPluginWorkerRuntime(
   const exit = options.exit ?? ((code: number) => process.exit(code))
   const commandHandlers = new Map<string, (args: unknown) => unknown | Promise<unknown>>()
   const eventHandlers = new Map<string, ((payload: unknown) => void | Promise<void>)[]>()
+  const taskSourceImplementations = new Map<string, PluginTaskSourceImplementation>()
   const pendingHostCalls = new Map<
     number,
     { resolve: (value: unknown) => void; reject: (error: PluginHostCallError) => void }
@@ -102,6 +117,11 @@ export function createPluginWorkerRuntime(
           eventHandlers.set(event, handlers)
         }
       },
+      taskSources: {
+        register(sourceId, implementation) {
+          taskSourceImplementations.set(sourceId, implementation)
+        }
+      },
       host: {
         call(method, params) {
           const callId = nextHostCallId++
@@ -117,7 +137,11 @@ export function createPluginWorkerRuntime(
       }
     }
     await activate(orca)
-    send({ type: 'ready', commands: [...commandHandlers.keys()] })
+    send({
+      type: 'ready',
+      commands: [...commandHandlers.keys()],
+      taskSources: [...taskSourceImplementations.keys()]
+    })
   }
 
   return {
@@ -151,6 +175,31 @@ export function createPluginWorkerRuntime(
             } catch (error) {
               send({
                 type: 'commandResult',
+                callId: message.callId,
+                ok: false,
+                error: toErrorMessage(error)
+              })
+            }
+            return
+          }
+          case 'invokeExtension': {
+            const implementation = taskSourceImplementations.get(message.providerId)
+            const handler = implementation?.[message.method]
+            if (typeof handler !== 'function') {
+              send({
+                type: 'extensionResult',
+                callId: message.callId,
+                ok: false,
+                error: `no ${message.point} handler for ${message.providerId}.${message.method}`
+              })
+              return
+            }
+            try {
+              const value = await handler(message.args)
+              send({ type: 'extensionResult', callId: message.callId, ok: true, value })
+            } catch (error) {
+              send({
+                type: 'extensionResult',
                 callId: message.callId,
                 ok: false,
                 error: toErrorMessage(error)

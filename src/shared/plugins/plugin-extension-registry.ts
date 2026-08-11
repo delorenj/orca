@@ -37,6 +37,22 @@ export const PLUGIN_COMMAND_EXTENSION_POINT = definePluginExtensionPoint<PluginW
   { experimental: true }
 )
 
+/** A contributed task source whose implementation lives in the plugin's
+ *  worker. `method` is validated against the task-source method table before
+ *  it reaches the worker, and the reply is validated on the way back. */
+export type PluginWorkerTaskSource = {
+  readonly sourceId: string
+  invoke(method: string, args?: unknown): Promise<unknown>
+}
+
+export const PLUGIN_TASK_SOURCE_EXTENSION_POINT =
+  definePluginExtensionPoint<PluginWorkerTaskSource>('taskSource', { experimental: true })
+
+/** Point keys the worker protocol accepts. Kept beside the points themselves
+ *  so a new point cannot ship without deciding whether workers can serve it. */
+export const PLUGIN_EXTENSION_POINT_KEYS = ['taskSource'] as const
+export type PluginExtensionPointKey = (typeof PLUGIN_EXTENSION_POINT_KEYS)[number]
+
 export type PluginExtensionRegistration<T> = {
   pluginId: string
   /** Contribution id within the plugin; addresses one of several providers. */

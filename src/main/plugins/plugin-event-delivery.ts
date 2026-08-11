@@ -10,12 +10,18 @@ import type { PluginWorkerController } from './plugin-worker-controller'
 export function deliverPluginEvent(options: {
   event: PluginEventName
   payload: unknown
+  /** False when the plugin system is off or the service is disposed; the
+   *  guard lives here so no emitter can forget it. */
+  enabled: boolean
   plugins: readonly DiscoveredPlugin[]
   eventBus: PluginEventBus
   workerController: PluginWorkerController
   isRuntimeApproved: (plugin: ValidDiscoveredPlugin) => boolean
   logWarning: (pluginKey: string, line: string) => void
 }): void {
+  if (!options.enabled) {
+    return
+  }
   const projected = options.eventBus.projectPayload(options.event, options.payload)
   if (!projected.ok) {
     return
