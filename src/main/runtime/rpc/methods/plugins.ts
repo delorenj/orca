@@ -61,6 +61,13 @@ const PluginInvokeCommandParams = z.object({
   args: z.unknown().optional()
 })
 
+const PluginInvokeTaskSourceParams = z.object({
+  pluginKey: z.string().min(1),
+  sourceId: z.string().min(1),
+  method: z.string().min(1),
+  args: z.unknown().optional()
+})
+
 async function listForRpc(): Promise<PluginListEntry[]> {
   return listPluginsForClients(requirePluginService())
 }
@@ -149,6 +156,32 @@ export const PLUGIN_METHODS: readonly RpcMethod[] = [
       const service = requirePluginService()
       await service.whenReady()
       return service.invokeCommand(params.pluginKey, params.commandId, params.args)
+    }
+  }),
+  defineMethod({
+    // Why: credentials and outbound HTTP for a contributed tracker live on the
+    // runtime, so a paired client must reach its providers over RPC rather
+    // than trying to serve them locally.
+    name: 'plugins.listTaskSources',
+    params: null,
+    handler: async () => {
+      const service = requirePluginService()
+      await service.whenReady()
+      return { sources: service.taskSources.list() }
+    }
+  }),
+  defineMethod({
+    name: 'plugins.invokeTaskSource',
+    params: PluginInvokeTaskSourceParams,
+    handler: async (params) => {
+      const service = requirePluginService()
+      await service.whenReady()
+      return service.taskSources.invoke(
+        params.pluginKey,
+        params.sourceId,
+        params.method,
+        params.args
+      )
     }
   })
 ]

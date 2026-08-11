@@ -60,6 +60,7 @@ import type {
   PluginPanelEntry
 } from '../shared/plugins/plugin-panel-bridge'
 import type { PluginConsentRequest } from '../shared/plugins/plugin-consent-request'
+import type { PluginTaskSourceProjection } from '../shared/plugins/plugin-task-source-projection'
 import type { PluginChangeEvent } from '../shared/plugins/plugin-change-event'
 import type {
   BaseRefSearchResult,
@@ -611,6 +612,14 @@ const api = {
       commandId: string
       args?: unknown
     }): Promise<unknown> => ipcRenderer.invoke('plugins:invokeCommand', args),
+    listTaskSources: (): Promise<PluginTaskSourceProjection[]> =>
+      ipcRenderer.invoke('plugins:listTaskSources'),
+    invokeTaskSource: (args: {
+      pluginKey: string
+      sourceId: string
+      method: string
+      args?: unknown
+    }): Promise<unknown> => ipcRenderer.invoke('plugins:invokeTaskSource', args),
     panelAction: (args: {
       sessionToken: string
       action: string

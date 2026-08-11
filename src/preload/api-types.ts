@@ -114,6 +114,7 @@ import type {
   PluginPanelEntry
 } from '../shared/plugins/plugin-panel-bridge'
 import type { PluginConsentRequest } from '../shared/plugins/plugin-consent-request'
+import type { PluginTaskSourceProjection } from '../shared/plugins/plugin-task-source-projection'
 import type { PluginLanguagePackRegistration } from '../shared/plugins/plugin-language-pack-artifact'
 import type { PluginChangeEvent } from '../shared/plugins/plugin-change-event'
 import type { PluginManifest } from '../shared/plugins/plugin-manifest'
@@ -3540,6 +3541,17 @@ export type PreloadApi = {
     invokeCommand: (args: {
       pluginKey: string
       commandId: string
+      args?: unknown
+    }) => Promise<unknown>
+    /** Task sources contributed by approved plugins — manifest facts only,
+     *  never connection values or credentials. */
+    listTaskSources: () => Promise<PluginTaskSourceProjection[]>
+    /** Calls one task-source method. Params and results are schema-checked on
+     *  the runtime, so a plugin cannot hand the renderer an unknown shape. */
+    invokeTaskSource: (args: {
+      pluginKey: string
+      sourceId: string
+      method: string
       args?: unknown
     }) => Promise<unknown>
     /** Relays a sandboxed panel's bridge request to main, which enforces the

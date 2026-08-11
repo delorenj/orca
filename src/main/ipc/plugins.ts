@@ -49,6 +49,15 @@ const invokeCommandArgsSchema = z.object({
   args: z.unknown().optional()
 })
 
+const invokeTaskSourceArgsSchema = z.object({
+  pluginKey: z.string().min(1),
+  sourceId: z.string().min(1),
+  method: z.string().min(1),
+  // Params are validated against the method's own schema in the service, so
+  // the transport only has to carry them.
+  args: z.unknown().optional()
+})
+
 const installArgsSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('local-path'), path: z.string().min(1) }),
   z.object({
@@ -181,6 +190,22 @@ export function registerPluginHandlers(
     await pluginService.whenReady()
     const parsed = invokeCommandArgsSchema.parse(args)
     return pluginService.invokeCommand(parsed.pluginKey, parsed.commandId, parsed.args)
+  })
+
+  ipcMain.handle('plugins:listTaskSources', async () => {
+    await pluginService.whenReady()
+    return pluginService.taskSources.list()
+  })
+
+  ipcMain.handle('plugins:invokeTaskSource', async (_event, args: unknown) => {
+    await pluginService.whenReady()
+    const parsed = invokeTaskSourceArgsSchema.parse(args)
+    return pluginService.taskSources.invoke(
+      parsed.pluginKey,
+      parsed.sourceId,
+      parsed.method,
+      parsed.args
+    )
   })
 
   ipcMain.handle('plugins:install', async (_event, args: unknown) => {

@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RpcContext, RpcMethod } from '../core'
 import type { PluginService } from '../../../plugins/plugin-service'
 import { PLUGIN_METHODS, setPluginServiceForRpc } from './plugins'
+import {
+  PLUGIN_TASK_SOURCES_RUNTIME_CAPABILITY,
+  RUNTIME_CAPABILITIES
+} from '../../../../shared/protocol-version'
 
 const SESSION_TOKEN = 's'.repeat(43)
 
@@ -70,5 +74,59 @@ describe('plugin panel serve RPC identity', () => {
       action: 'workspace.readContext',
       params: {}
     })
+  })
+})
+
+describe('plugin task source serve RPC', () => {
+  function taskSourceService(): PluginService {
+    return {
+      whenReady: vi.fn().mockResolvedValue(undefined),
+      taskSources: {
+        list: vi.fn().mockReturnValue([{ providerId: 'plugin:delorenj.plane/plane' }]),
+        invoke: vi.fn().mockResolvedValue({ connections: [] })
+      }
+    } as unknown as PluginService
+  }
+
+  it('exposes contributed sources so a paired client can populate its selector', async () => {
+    const service = taskSourceService()
+    setPluginServiceForRpc(service)
+
+    await expect(method('plugins.listTaskSources').handler(undefined, context())).resolves.toEqual({
+      sources: [{ providerId: 'plugin:delorenj.plane/plane' }]
+    })
+  })
+
+  it('routes an invocation through the service chokepoint', async () => {
+    const service = taskSourceService()
+    setPluginServiceForRpc(service)
+
+    await expect(
+      method('plugins.invokeTaskSource').handler(
+        {
+          pluginKey: 'delorenj.plane',
+          sourceId: 'plane',
+          method: 'connections.list',
+          args: undefined
+        },
+        context()
+      )
+    ).resolves.toEqual({ connections: [] })
+    expect(service.taskSources.invoke).toHaveBeenCalledWith(
+      'delorenj.plane',
+      'plane',
+      'connections.list',
+      undefined
+    )
+  })
+
+  it('rejects a malformed invocation before it reaches the service', () => {
+    const schema = method('plugins.invokeTaskSource').params!
+
+    expect(schema.safeParse({ pluginKey: 'delorenj.plane', sourceId: 'plane' }).success).toBe(false)
+  })
+
+  it('advertises the capability clients gate the surface on', () => {
+    expect(RUNTIME_CAPABILITIES).toContain(PLUGIN_TASK_SOURCES_RUNTIME_CAPABILITY)
   })
 })

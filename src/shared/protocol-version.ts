@@ -45,6 +45,11 @@ export const LINEAR_ISSUE_ATTRIBUTE_FILTER_RUNTIME_CAPABILITY =
 // (aiVault.listSessions). Registered unconditionally for every build, so it is a
 // STATIC capability advertised by getStatus() automatically — NOT a runtime
 // conditional like browser.headless.v1.
+// Why: adding RPC methods does not bump RUNTIME_PROTOCOL_VERSION, so a client
+// that just calls plugins.listTaskSources against an older host gets an
+// unknown-method failure with nothing to explain it. Clients gate the whole
+// plugin-task-source surface on this instead.
+export const PLUGIN_TASK_SOURCES_RUNTIME_CAPABILITY = 'plugins.task-sources.v1' as const
 export const AI_VAULT_RUNTIME_CAPABILITY = 'aiVault.v1' as const
 export const AI_VAULT_SESSION_TITLES_RUNTIME_CAPABILITY = 'aiVault.session-titles.v1' as const
 // Why: signals a host owns browser pages with no renderer (headless serve via the
@@ -104,6 +109,7 @@ export const RUNTIME_CAPABILITIES = [
   WORKTREE_LINKED_WORK_ITEM_CONTEXT_RUNTIME_CAPABILITY,
   FOLDER_WORKSPACE_PATH_STATUS_RUNTIME_CAPABILITY,
   LINEAR_ISSUE_ATTRIBUTE_FILTER_RUNTIME_CAPABILITY,
+  PLUGIN_TASK_SOURCES_RUNTIME_CAPABILITY,
   AI_VAULT_RUNTIME_CAPABILITY,
   AI_VAULT_SESSION_TITLES_RUNTIME_CAPABILITY,
   TERMINAL_QUERY_REPLY_INPUT_RUNTIME_CAPABILITY,
