@@ -1,13 +1,15 @@
-import type { TaskProvider } from '../../../shared/types'
+import type { TaskSourceId } from '../../../shared/task-source-id'
+import { isPluginTaskSourceId } from '../../../shared/task-source-id'
 
 export type TaskPageListChromeVisibilityState = {
-  taskSource: TaskProvider
+  taskSource: TaskSourceId
   hasGitHubDetail: boolean
   hasGitLabDetail: boolean
   hasJiraDetail: boolean
   hasLinearIssueDetail: boolean
   hasLinearProjectContext: boolean
   hasLinearViewContext: boolean
+  hasPluginSourceDetail: boolean
 }
 
 export function shouldHideTaskPageListChrome({
@@ -17,8 +19,12 @@ export function shouldHideTaskPageListChrome({
   hasJiraDetail,
   hasLinearIssueDetail,
   hasLinearProjectContext,
-  hasLinearViewContext
+  hasLinearViewContext,
+  hasPluginSourceDetail
 }: TaskPageListChromeVisibilityState): boolean {
+  if (isPluginTaskSourceId(taskSource)) {
+    return hasPluginSourceDetail
+  }
   // Why: provider-specific selection can intentionally survive source switches;
   // stale detail state from another provider must not hide the active list chrome.
   switch (taskSource) {

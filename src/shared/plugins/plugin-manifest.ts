@@ -202,22 +202,32 @@ export function satisfiesOrcaEngineRange(hostVersion: string, range: string): bo
   return true
 }
 
+/**
+ * Splits `plugin:<publisher>.<id>/<contributionId>` into its parts, or null.
+ * Shared by panel tabs and task sources so the two grammars cannot drift —
+ * they are disjoint by the field that stores them, not by their prefix.
+ */
+export function parsePluginContributionKey(
+  value: string
+): { qualifiedKey: string; contributionId: string } | null {
+  if (!value.startsWith('plugin:')) {
+    return null
+  }
+  const [qualifiedKey, contributionId, ...extra] = value.slice('plugin:'.length).split('/')
+  if (extra.length !== 0 || !qualifiedKey || !contributionId) {
+    return null
+  }
+  if (!isQualifiedPluginKey(qualifiedKey) || !isPluginManifestId(contributionId)) {
+    return null
+  }
+  return { qualifiedKey, contributionId }
+}
+
 /** Sidebar tab key for a plugin panel: `plugin:<publisher>.<id>/<panelId>`. */
 export function pluginPanelTabKey(qualifiedKey: string, panelId: string): `plugin:${string}` {
   return `plugin:${qualifiedKey}/${panelId}`
 }
 
 export function isPluginPanelTabKey(tab: string): tab is `plugin:${string}` {
-  if (!tab.startsWith('plugin:')) {
-    return false
-  }
-  const rest = tab.slice('plugin:'.length)
-  const [qualifiedKey, panelId, ...extra] = rest.split('/')
-  return (
-    extra.length === 0 &&
-    !!qualifiedKey &&
-    !!panelId &&
-    isQualifiedPluginKey(qualifiedKey) &&
-    isPluginManifestId(panelId)
-  )
+  return parsePluginContributionKey(tab) !== null
 }

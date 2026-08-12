@@ -15,7 +15,7 @@ import {
   type LinearViewMode
 } from '../../../shared/linear-issue-view-resume-state'
 import { getTaskPresetQuery } from '../../../shared/task-preset-query'
-import type { TaskProvider, TaskViewPresetId } from '../../../shared/types'
+import type { TaskSourceId, TaskViewPresetId } from '../../../shared/types'
 
 export type GitLabTaskFilter = 'opened' | 'merged' | 'closed' | 'all'
 export type GitLabIssueFilter = 'opened' | 'assigned-to-me'
@@ -29,7 +29,7 @@ export type TaskQueryPreset = {
 export type GitHubTaskKind = 'issues' | 'prs'
 
 export type SourceOption = {
-  id: TaskProvider
+  id: TaskSourceId
   label: string
   Icon: (props: { className?: string }) => React.JSX.Element
   disabled?: boolean

@@ -19,7 +19,7 @@ import type { VoiceSettings } from './speech-types'
 import type { WorkspaceCleanupUIState } from './workspace-cleanup'
 import type { LargeDiffRenderLimit } from './large-diff-render-limit'
 import type { GitLabProjectSettings } from './gitlab-types'
-import type { TaskProvider } from './task-providers'
+import type { TaskSourceId } from './task-source-id'
 import type { FeatureTipId } from './feature-tips'
 import type { ContextualTourId } from './contextual-tours'
 import type {
@@ -59,6 +59,7 @@ import type { ComputerAwakeMode } from './computer-awake-mode'
 // `WorkspaceCreateTelemetrySource` from '../../../shared/types'.
 export type { WorkspaceSource as WorkspaceCreateTelemetrySource } from './workspace-source'
 export type { TaskProvider } from './task-providers'
+export type { PluginTaskSourceId, TaskSourceId } from './task-source-id'
 export type {
   GitBranchChangeStatus,
   GitConflictKind,
@@ -3043,9 +3044,11 @@ export type GlobalSettings = {
   /** Default preset in the new-workspace GitHub task view. */
   defaultTaskViewPreset: TaskViewPresetId
   /** Persisted last-used task source so Tasks reopens to the same provider instead of defaulting to GitHub. */
-  defaultTaskSource: TaskProvider
-  /** Persisted visible task providers; hides unused providers from Tasks chrome and sidebar shortcuts. */
-  visibleTaskProviders: TaskProvider[]
+  defaultTaskSource: TaskSourceId
+  /** Persisted visible task providers; hides unused providers from Tasks chrome and sidebar shortcuts.
+   *  Holds plugin-contributed source ids too, which are kept even while their
+   *  plugin is uninstalled so a reinstall restores the user's selection. */
+  visibleTaskProviders: TaskSourceId[]
   /** Why: one-shot guard to make Jira visible for existing profiles once, without re-adding after a later opt-out. */
   visibleTaskProvidersDefaultedForJira: boolean
   /** Persisted repo selection (cross-repo tasks view). null = sticky-all (includes future-added repos);

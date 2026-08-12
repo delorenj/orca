@@ -16,7 +16,7 @@ import type {
   PersistedTrustedOrcaHooks,
   PersistedUIState,
   StatusBarItem,
-  TaskProvider,
+  TaskSourceId,
   TaskResumeState,
   TaskViewPresetId,
   TuiAgent,
@@ -686,7 +686,7 @@ export type UISlice = {
   taskPageData: {
     preselectedRepoId?: string
     prefilledName?: string
-    taskSource?: TaskProvider
+    taskSource?: TaskSourceId
     openGitHubWorkItem?: GitHubWorkItem
     openGitHubSourceContext?: TaskSourceContext | null
     openGitHubInitialTab?: 'conversation' | 'checks' | 'files'

@@ -422,6 +422,7 @@ import {
   restoreAvailableDefaultTaskProvider,
   resolveVisibleTaskProvider
 } from '../../../shared/task-providers'
+import type { TaskSourceId } from '../../../shared/task-source-id'
 import { translate } from '@/i18n/i18n'
 import { formatUiRelativeTimeFromDate } from '@/i18n/relative-time-format'
 import {
@@ -3194,7 +3195,7 @@ export default function TaskPage(): React.JSX.Element {
         (visibleProvider) => visibleProvider !== provider
       )
       // Why: an empty provider list normalizes to "all providers", so keep one other source visible or hiding this one has no effect.
-      const nextVisibleTaskProviders: TaskProvider[] =
+      const nextVisibleTaskProviders: TaskSourceId[] =
         visibleWithoutProvider.length > 0 ? visibleWithoutProvider : ['github']
       const nextDefaultTaskSource = resolveVisibleTaskProvider(
         defaultTaskSource,
@@ -3220,7 +3221,7 @@ export default function TaskPage(): React.JSX.Element {
   const initialTaskQuery = getTaskPresetQuery(defaultTaskViewPreset)
 
   const preferredTaskSource = pageData.taskSource ?? defaultTaskSource
-  const [taskSource, setTaskSource] = useState<TaskProvider>(
+  const [taskSource, setTaskSource] = useState<TaskSourceId>(
     resolveVisibleTaskProvider(preferredTaskSource, visibleTaskProviders)
   )
   const runtimePreflightMountedRef = useRef(true)
@@ -8867,7 +8868,10 @@ export default function TaskPage(): React.JSX.Element {
     hasJiraDetail: Boolean(selectedJiraIssue),
     hasLinearIssueDetail: Boolean(selectedLinearIssue),
     hasLinearProjectContext: Boolean(selectedLinearProject),
-    hasLinearViewContext: Boolean(selectedLinearCustomView)
+    hasLinearViewContext: Boolean(selectedLinearCustomView),
+    // Plugin sources own their own detail state; wired when the plugin source
+    // view lands.
+    hasPluginSourceDetail: false
   })
 
   return (

@@ -12,7 +12,8 @@ const baseState: TaskPageListChromeVisibilityState = {
   hasJiraDetail: false,
   hasLinearIssueDetail: false,
   hasLinearProjectContext: false,
-  hasLinearViewContext: false
+  hasLinearViewContext: false,
+  hasPluginSourceDetail: false
 }
 
 describe('shouldHideTaskPageListChrome', () => {

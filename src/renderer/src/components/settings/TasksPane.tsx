@@ -6,6 +6,7 @@ import {
   normalizeVisibleTaskProviders,
   resolveVisibleTaskProvider
 } from '../../../../shared/task-providers'
+import { isPluginTaskSourceId } from '../../../../shared/task-source-id'
 import { JiraIcon } from '@/components/icons/JiraIcon'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import { Button } from '@/components/ui/button'
@@ -97,7 +98,11 @@ export function TasksPane({ settings, updateSettings }: TasksPaneProps): React.J
   const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
   const checkJiraConnection = useAppStore((s) => s.checkJiraConnection)
   const refreshPreflightStatus = useAppStore((s) => s.refreshPreflightStatus)
-  const readinessByProvider = useTaskSourceProviderReadiness(visibleProviders)
+  // Readiness is a built-in-provider concept; plugin sources report status
+  // through the plugin registry instead.
+  const readinessByProvider = useTaskSourceProviderReadiness(
+    visibleProviders.filter((provider): provider is TaskProvider => !isPluginTaskSourceId(provider))
+  )
   useIntegrationProviderStatusRefresh()
 
   // Warn only about started-then-stalled setup; untouched providers are the default.

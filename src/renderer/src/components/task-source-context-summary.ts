@@ -3,8 +3,9 @@ import { getExecutionHostLabel } from '../../../shared/execution-host'
 import type { ExecutionHostScope } from '../../../shared/execution-host'
 import type { ExecutionHostHealth } from '../../../shared/execution-host-registry'
 import type { SshConnectionStatus } from '../../../shared/ssh-types'
-import type { TaskProvider } from '../../../shared/types'
-import type { TaskProviderIdentity, TaskSourceContext } from '../../../shared/task-source-context'
+import type { TaskSourceContext } from '../../../shared/task-source-context'
+import { getProviderIdentityLabel } from './task-provider-identity-label'
+import { isPluginTaskSourceId, type TaskSourceId } from '../../../shared/task-source-id'
 
 export type TaskSourceContextSummary = {
   label: string
@@ -36,7 +37,7 @@ function getHostLabel(hostId: ExecutionHostScope, hostLabelById: HostLabelLookup
 }
 
 export function getTaskSourceContextSummary(args: {
-  provider: TaskProvider
+  provider: TaskSourceId
   providerLabel: string
   repoContexts?: readonly TaskSourceContext[]
   hostAvailability?: readonly TaskSourceHostAvailability[]
@@ -46,6 +47,16 @@ export function getTaskSourceContextSummary(args: {
   linearWorkspaceName?: string | null
   jiraSiteName?: string | null
 }): TaskSourceContextSummary {
+  if (isPluginTaskSourceId(args.provider)) {
+    // Why: a plugin source is account-backed by construction — its connections
+    // live in the plugin, not in Orca's repo list.
+    return getAccountBackedTaskSourceSummary(args.providerLabel, {
+      accountLabel: null,
+      accountHostId: args.accountHostId,
+      hostLabelById: args.hostLabelById,
+      hostAvailability: args.hostAvailability
+    })
+  }
   switch (args.provider) {
     case 'github':
     case 'gitlab':
@@ -178,26 +189,6 @@ function getAccountBackedTaskSourceSummary(
       .filter((part): part is string => Boolean(part))
       .join(' · '),
     title: titleParts.join(' · ')
-  }
-}
-
-function getProviderIdentityLabel(
-  identity: TaskProviderIdentity | null | undefined
-): string | null {
-  if (!identity) {
-    return null
-  }
-  switch (identity.provider) {
-    case 'github':
-      return `${identity.owner}/${identity.repo}`
-    case 'gitlab':
-      return identity.namespace && identity.project
-        ? `${identity.namespace}/${identity.project}`
-        : (identity.projectId ?? null)
-    case 'linear':
-      return identity.workspaceName ?? identity.workspaceId ?? null
-    case 'jira':
-      return identity.siteUrl ?? identity.siteId ?? null
   }
 }
 
