@@ -1995,7 +1995,20 @@
         "linearModeHasWorktreeTooltip": "Linear tickets linked to an Orca workspace",
         "linearEmptyHasWorktree": "No Linear tickets are linked to an Orca workspace yet. Start work from a Linear issue to see it here.",
         "linearOpenAttachedWorkspace": "Open workspace attached to {{value0}}",
-        "linearWorktreesColumn": "Workspaces"
+        "linearWorktreesColumn": "Workspaces",
+        "pluginGroupStarted": "In progress",
+        "pluginGroupUnstarted": "Todo",
+        "pluginGroupBacklog": "Backlog",
+        "pluginGroupCompleted": "Done",
+        "pluginGroupCancelled": "Cancelled",
+        "pluginOpenExternal": "Open in browser",
+        "pluginStartWorkspace": "Start workspace",
+        "pluginSourceUnavailable": "This task source is not available. Enable its plugin in Settings → Plugins.",
+        "pluginSelectConnection": "Select a connection",
+        "pluginSelectScope": "Select a project",
+        "pluginRefresh": "Refresh",
+        "pluginNoConnections": "No connections yet. Add one in Settings → Tasks.",
+        "pluginNoItems": "No open work items here."
       },
       "Terminal": {
         "73768427cf": "Close",

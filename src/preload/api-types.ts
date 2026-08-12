@@ -1017,6 +1017,10 @@ export type PluginHostListEntry = {
   bundled: boolean
   capabilities: { kind: string; description: string }[]
   panels: PluginHostPanel[]
+  /** Task sources this plugin contributes; manifest facts only, never a
+   *  connection value or credential. Optional because a host predating the
+   *  contribution point omits it entirely — readers must treat absent as none. */
+  taskSources?: PluginTaskSourceProjection[]
   commands: {
     id: string
     title: string

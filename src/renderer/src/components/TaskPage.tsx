@@ -229,7 +229,10 @@ import {
   normalizeTaskSourceContext,
   type TaskSourceContext
 } from '../../../shared/task-source-context'
-import { getLinearIssueWorkspaceName } from '../../../shared/workspace-name'
+import {
+  getLinearIssueWorkspaceName,
+  slugifyForWorkspaceName
+} from '../../../shared/workspace-name'
 import {
   buildTaskPageRepoSourceState,
   deriveTaskPageGitHubWorkItemsFetchOptions,
@@ -422,7 +425,11 @@ import {
   restoreAvailableDefaultTaskProvider,
   resolveVisibleTaskProvider
 } from '../../../shared/task-providers'
-import type { TaskSourceId } from '../../../shared/task-source-id'
+import { isPluginTaskSourceId, type TaskSourceId } from '../../../shared/task-source-id'
+import { resolvePluginPanelIcon } from './right-sidebar/plugin-panel-activity-items'
+import { usePluginTaskSources } from '@/store/plugin-task-sources'
+import { PluginTaskSourcePage } from './task-page-plugin-source-page'
+import type { PluginTaskWorkItem } from '../../../shared/plugins/plugin-task-source-contract'
 import { translate } from '@/i18n/i18n'
 import { formatUiRelativeTimeFromDate } from '@/i18n/relative-time-format'
 import {
@@ -3175,7 +3182,23 @@ export default function TaskPage(): React.JSX.Element {
       preflightStatus?.glab?.installed
     ]
   )
-  const sourceOptions = getSourceOptions()
+  const pluginTaskSources = usePluginTaskSources()
+  // Why: getSourceOptions() is a static catalog of the built-ins, and
+  // visibleSourceOptions filters against it — a plugin id in the settings list
+  // would find no option and vanish from the picker unless merged in first.
+  const builtinSourceOptions = getSourceOptions()
+  const sourceOptions = useMemo(
+    () => [
+      ...builtinSourceOptions,
+      ...pluginTaskSources.map((source) => ({
+        id: source.providerId,
+        label: source.title,
+        Icon: resolvePluginPanelIcon(source.icon ?? undefined),
+        disabled: !source.enabled
+      }))
+    ],
+    [builtinSourceOptions, pluginTaskSources]
+  )
   const githubModeButtons = getGitHubModeButtons()
   const linearModeOptions = getLinearModeOptions()
   const jiraPresets = getJiraPresets()
@@ -8818,6 +8841,18 @@ export default function TaskPage(): React.JSX.Element {
     setLinearRefreshNonce((n) => n + 1)
   }, [])
 
+  const handleStartWorkspaceFromPluginItem = useCallback(
+    (item: PluginTaskWorkItem): void => {
+      // Why no linkedWorkItem: WorkspaceLinkedItem.provider is still a closed
+      // built-in union, so a plugin reference cannot be persisted yet. Seed the
+      // name rather than attaching a link the store would silently drop.
+      openModal('new-workspace-composer', {
+        prefilledName: slugifyForWorkspaceName(`${item.identifier}-${item.title}`)
+      })
+    },
+    [openModal]
+  )
+
   const openComposerForJiraItem = useCallback(
     (issue: JiraIssue): void => {
       const taskSourceContext = bindTaskPageJiraItemSourceContext({
@@ -9995,7 +10030,16 @@ export default function TaskPage(): React.JSX.Element {
             </section>
           </div>
 
-          {taskSource === 'github' && dialogWorkItem ? (
+          {isPluginTaskSourceId(taskSource) ? (
+            // Why FIRST: this chain has no taskSource guard below the Linear
+            // arms and its terminal branch renders Linear's list, so any arm
+            // after this point would let a plugin source fall through to
+            // "Connect your Linear account".
+            <PluginTaskSourcePage
+              sourceId={taskSource}
+              onStartWorkspace={handleStartWorkspaceFromPluginItem}
+            />
+          ) : taskSource === 'github' && dialogWorkItem ? (
             dialogWorkItem.type === 'pr' ? (
               <PullRequestPage
                 workItem={dialogWorkItem}

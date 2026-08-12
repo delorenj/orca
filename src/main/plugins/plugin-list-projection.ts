@@ -4,6 +4,11 @@ import {
 } from '../../shared/plugins/plugin-capabilities'
 import { needsReconsent } from '../../shared/plugins/plugin-consent-state'
 import { pluginPanelTabKey } from '../../shared/plugins/plugin-manifest'
+import { pluginTaskProviderKey } from '../../shared/plugins/plugin-task-source-contribution'
+import {
+  projectPluginTaskSource,
+  type PluginTaskSourceProjection
+} from '../../shared/plugins/plugin-task-source-projection'
 import type { PluginLockfile } from '../../shared/plugins/plugin-install-lockfile'
 import { isInvalidDiscoveredPlugin } from './plugin-discovery'
 import type { PluginService } from './plugin-service'
@@ -57,6 +62,9 @@ export type PluginListEntry = {
   bundled: boolean
   capabilities: { kind: PluginCapabilityKind; description: string }[]
   panels: PluginListPanelEntry[]
+  /** Task sources this plugin contributes; manifest facts only, never a
+   *  connection value or credential. */
+  taskSources: PluginTaskSourceProjection[]
   commands: {
     id: string
     title: string
@@ -112,6 +120,7 @@ export async function buildPluginList(
           bundled: false,
           capabilities: [],
           panels: [],
+          taskSources: [],
           commands: [],
           hasWorker: false,
           vmRecipes: [],
@@ -177,6 +186,13 @@ export async function buildPluginList(
           ...(panel.icon ? { icon: panel.icon } : {}),
           tabKey: pluginPanelTabKey(plugin.pluginKey, panel.id)
         })),
+        taskSources: plugin.manifest.contributes.taskSources.map((source) =>
+          projectPluginTaskSource(
+            pluginTaskProviderKey(plugin.pluginKey, source.id),
+            plugin.pluginKey,
+            source
+          )
+        ),
         commands: service.contentPacks.commands.preview(plugin.pluginKey).map((command) => ({
           id: command.id,
           title: command.title,
