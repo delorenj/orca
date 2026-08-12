@@ -12,7 +12,11 @@ export const TERMINAL_QUERY_REPLY_JS = `
   }
 
   function forwardTerminalDataReply(data) {
-    if (terminalDataRepliesEnabled) notify({ type: 'terminal-data', bytes: data });
+    if (!terminalDataRepliesEnabled) return;
+    // Why: a phone theme write would otherwise send the host a second CSI 997 on top of the
+    // desktop's own flip push, and describe the phone's theme rather than the host's (#9993).
+    if (isSuppressedXtermColorSchemePush(data)) return;
+    notify({ type: 'terminal-data', bytes: data });
   }
 
   function enqueueTerminalDataReplyBoundary(gen) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { XTERM_WEBVIEW_SOURCE } from './terminal-webview-html'
 import { TERMINAL_QUERY_REPLY_JS } from './terminal-webview-query-reply-injected'
+import { TERMINAL_COLOR_SCHEME_PUSH_JS } from './terminal-webview-color-scheme-push-injected'
 
 type QueryReplyGate = {
   forward: (data: string) => void
@@ -19,6 +20,7 @@ function createQueryReplyGate(notify: (message: unknown) => void): {
     'notify',
     'enqueueWriteBoundary',
     `var terminalGeneration = 0;
+      ${TERMINAL_COLOR_SCHEME_PUSH_JS}
       ${TERMINAL_QUERY_REPLY_JS}
       return {
         forward: forwardTerminalDataReply,

@@ -13,8 +13,10 @@ function sendMode2031Reply(
   return transport.sendInputImmediate(mode2031SequenceFor(mode))
 }
 
-// Appearance updates include font and opacity changes, so only report actual
-// color-mode flips to programs that still have mode 2031 enabled.
+// The single owner of mode-2031 notifications (#9993): subscribing is silent, and xterm's own
+// theme-write report is dropped. Appearance updates include font and opacity changes, so only
+// report actual color-mode flips to programs that still have mode 2031 enabled. `mode` must come
+// from resolveComposedTerminalColorSchemeMode (the palette the pane paints on), not the app mode.
 export function maybePushMode2031Flip(
   paneId: number,
   mode: TerminalColorSchemeMode,

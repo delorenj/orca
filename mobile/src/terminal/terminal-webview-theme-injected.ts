@@ -102,7 +102,13 @@ export const TERMINAL_WEBVIEW_THEME_JS = `
     document.body.style.background = background;
     terminalMinimumContrastRatio = resolveTerminalContrastFloor(background);
     if (term) {
-      term.options.theme = terminalTheme;
+      // Why suppressed: the theme write makes xterm push its own CSI 997 at 2031 subscribers,
+      // and this WebView forwards onData into the host PTY. The desktop's maybePushMode2031Flip
+      // is the single owner of that push (#9993). minimumContrastRatio is outside the window —
+      // it only clears xterm's contrast cache, it never re-reports the color scheme.
+      withSuppressedXtermColorSchemePush(function() {
+        term.options.theme = terminalTheme;
+      });
       term.options.minimumContrastRatio = terminalMinimumContrastRatio;
     }
   }

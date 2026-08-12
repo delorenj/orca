@@ -10,6 +10,7 @@ import { TERMINAL_SURFACE_SWAP_JS } from './terminal-webview-surface-swap-inject
 import { TERMINAL_TAP_DISPATCH_JS } from './terminal-webview-tap-dispatch-injected'
 import { TERMINAL_WEBVIEW_THEME_JS } from './terminal-webview-theme-injected'
 import { TERMINAL_QUERY_REPLY_JS } from './terminal-webview-query-reply-injected'
+import { TERMINAL_COLOR_SCHEME_PUSH_JS } from './terminal-webview-color-scheme-push-injected'
 import { URL_TAP_WEBVIEW_JS } from './terminal-webview-url-tap'
 import { TERMINAL_WEBGL_RECOVERY_JS } from './terminal-webview-webgl-recovery-injected'
 import { TERMINAL_MOUSE_CLICK_DRAG_JS } from './terminal-webview-mouse-click-drag-injected'
@@ -219,7 +220,7 @@ window.onerror = function(msg) {
   var CLAUDE_STATUS_DOT_PATTERN = new RegExp(CLAUDE_STATUS_DOT + '[' + TEXT_PRESENTATION_SELECTOR + EMOJI_PRESENTATION_SELECTOR + ']*', 'g');
   var statusDotPendingSelector = false;
   var PRIVATE_MODE_SCAN_TAIL_LIMIT = 4096;
-  var term = null; ${TERMINAL_QUERY_REPLY_JS}
+  var term = null; ${TERMINAL_COLOR_SCHEME_PUSH_JS} ${TERMINAL_QUERY_REPLY_JS}
   ${TERMINAL_SURFACE_SWAP_JS}
   var scrollIndicator = document.getElementById('scroll-indicator');
   var scrollThumb = document.getElementById('scroll-thumb');

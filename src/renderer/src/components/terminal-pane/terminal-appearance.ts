@@ -28,7 +28,10 @@ import type { TerminalViewAttributes } from '../../../../shared/terminal-view-at
 import { publishTerminalViewAttributes } from './terminal-view-attributes-publisher'
 import { normalizeTerminalLineHeight } from '../../../../shared/terminal-line-height-settings'
 import { maybePushMode2031Flip } from './terminal-mode-2031-replies'
+import { withSuppressedXtermColorSchemePush } from './xterm-theme-write-color-scheme-push'
 import { resolveTerminalMinimumContrastRatio } from '@/lib/terminal-contrast-correction'
+import { isTerminalBackgroundLight } from '@/lib/terminal-title-contrast'
+import type { TerminalColorSchemeMode } from '../../../../shared/terminal-color-scheme-protocol'
 
 export function hexToRgba(hex: string, alpha: number): string {
   let clean = hex.replace('#', '')
@@ -107,6 +110,42 @@ export function publishTerminalViewAttributesAtAppStart(
     : publishTerminalViewAttributes(theme, appearance.mode, settings)
 }
 
+/**
+ * The color scheme a mode-2031 subscriber is actually painting on, and the sole trigger for the
+ * CSI 997 flip push.
+ *
+ * Why the composed background and not `appearance.mode`: CSI 997 answers "is my background dark or
+ * light", and either theme slot can hold either kind of palette (same reason the contrast floor below
+ * is luminance-gated, #7934). App mode alone both misses palette-only flips — e.g. turning
+ * terminalUseSeparateLightTheme off under a light app theme swaps in the dark palette while the mode
+ * stays 'light' (#9993) — and can contradict the luminance-derived `CSI ?996n` answer that the same
+ * TUI reads. Falls back to the app mode only when no palette resolves.
+ */
+export function resolveComposedTerminalColorSchemeMode(
+  composedBackground: string | undefined,
+  appMode: TerminalColorSchemeMode
+): TerminalColorSchemeMode {
+  if (!composedBackground) {
+    return appMode
+  }
+  // appSurface: a translucent terminal background blends with the app surface, so judge the blend.
+  return isTerminalBackgroundLight(composedBackground, { appSurface: appMode }) ? 'light' : 'dark'
+}
+
+/** Same resolution from raw settings, for the subscribe-time seed that must agree with the push. */
+export function resolveTerminalPaneColorSchemeMode(
+  settings: GlobalSettings | null | undefined,
+  systemPrefersDark: boolean
+): TerminalColorSchemeMode {
+  if (!settings) {
+    return systemPrefersDark ? 'dark' : 'light'
+  }
+  const appearance = resolveEffectiveTerminalAppearance(settings, systemPrefersDark)
+  const baseTheme: ITheme | null = appearance.theme ?? getBuiltinTheme(appearance.themeName)
+  const theme = composeActiveTerminalTheme(baseTheme, settings)
+  return resolveComposedTerminalColorSchemeMode(theme?.background, appearance.mode)
+}
+
 // Value equality over composed ITheme objects (flat string slots plus the extendedAnsi array); gates the options.theme write.
 function composedTerminalThemesEqual(a: ITheme | undefined, b: ITheme): boolean {
   if (!a) {
@@ -149,6 +188,7 @@ export function applyTerminalAppearance(
   // Publish composed appearance to main's hidden-PTY query responder — the only point it exists; deduped in the publisher.
   publishTerminalViewAttributes(theme, appearance.mode, settings)
   const paneBackground = theme?.background ?? '#000000'
+  const colorSchemeMode = resolveComposedTerminalColorSchemeMode(theme?.background, appearance.mode)
 
   const terminalFontWeights = resolveTerminalFontWeights(settings.terminalFontWeight)
   const ligaturesEnabled = resolveTerminalLigaturesEnabled(
@@ -158,8 +198,11 @@ export function applyTerminalAppearance(
 
   for (const pane of manager.getPanes()) {
     // Why value-gated: writing options.theme rebuilds the palette, discarding TUI OSC 4/10/11/12 mutations; skip on no-op change.
+    // Why suppressed: the write makes xterm push its own CSI 997 at 2031 subscribers; maybePushMode2031Flip below is the single owner (#9993).
     if (theme && !composedTerminalThemesEqual(pane.terminal.options.theme, theme)) {
-      pane.terminal.options.theme = theme
+      withSuppressedXtermColorSchemePush(() => {
+        pane.terminal.options.theme = theme
+      })
     }
     // Gate off the configured theme background; the live OSC-11 background is deliberately preserved by the
     // theme write above, so a TUI that repaints its background at runtime won't re-gate (known limitation).
@@ -205,10 +248,15 @@ export function applyTerminalAppearance(
     // Why unconditional: the helper no-ops when addon state already matches, so this keeps new panes and live toggles in sync.
     manager.setPaneLigaturesEnabled(pane.id, ligaturesEnabled)
     const transport = paneTransports.get(pane.id)
+    // Why outside the fit branch: a fit override withholds RESIZE, not terminal reports. The theme
+    // write above ran for this pane and its xterm copy was dropped, so skipping here means the
+    // subscriber hears nothing at all (#9993).
+    if (transport) {
+      maybePushMode2031Flip(pane.id, colorSchemeMode, transport, paneMode2031, paneLastThemeMode)
+    }
     // Why: PTY is already at phone dimensions under a mobile-fit override — don't resize it back to desktop.
     const appearancePtyId = transport?.getPtyId()
     if (transport?.isConnected() && (!appearancePtyId || !getFitOverrideForPty(appearancePtyId))) {
-      maybePushMode2031Flip(pane.id, appearance.mode, transport, paneMode2031, paneLastThemeMode)
       safeFitAndThen(pane, 'appearance-pty-resize', () => {
         const currentTransport = paneTransports.get(pane.id)
         if (

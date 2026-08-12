@@ -25,10 +25,10 @@ export type TerminalViewAttributes = {
   /** Full 256-entry palette: theme's 16 named colors + extendedAnsi/default
    *  tail, exactly as the renderer ThemeService resolves them. */
   ansi: TerminalViewRgb[]
-  /** Resolved APP color-scheme mode (the 2031/997 flip source). NOT the DSR
-   *  ?996n answer: that is computed from background/foreground relative
-   *  luminance like a visible xterm (_reportColorScheme), and the two can
-   *  disagree (e.g. dark terminal theme in light app mode). */
+  /** Resolved APP color-scheme mode. NOT a color-scheme answer for programs:
+   *  both the DSR ?996n reply and the 2031/997 flip push follow the composed
+   *  background's relative luminance like a visible xterm (_reportColorScheme),
+   *  and the two can disagree (e.g. dark terminal theme in light app mode). */
   colorSchemeMode: 'dark' | 'light'
   cursorStyle: TerminalViewCursorStyle
   cursorBlink: boolean

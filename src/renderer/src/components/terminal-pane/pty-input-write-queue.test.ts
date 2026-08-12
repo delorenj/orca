@@ -469,7 +469,8 @@ describe('pty input write queue', () => {
   })
 
   it('dual mode-2031 enqueues through the real queue never paint 997 under host echo-safe write', async () => {
-    // Issue path: xterm onData + mode-2031 scan each enqueue mode2031SequenceFor.
+    // Two 997s can still coalesce in one write: a fast theme flip, or an old client that
+    // still answers 2031 subscribes (#9993 made this host silent, mixed versions have not).
     // Drive the real write queue → host intercept (extract + answerLiveQueryReply)
     // → ingress echo strip, and assert no `997;1n` emission at the confirm prompt.
     vi.useFakeTimers()
@@ -517,6 +518,47 @@ describe('pty input write queue', () => {
     expect(afterPrompt).toBe('Ok to proceed? (y) ')
     expect(afterPrompt).not.toContain('997;1n')
     expect(afterPrompt).not.toContain(reply)
+    ingress.drainAndClose()
+    vi.useRealTimers()
+  })
+
+  it('the single flip reply this host now sends is stripped before the prompt paints', async () => {
+    // Post-#9993 steady state: maybePushMode2031Flip is the only emitter, so one theme flip
+    // enqueues exactly one reply. Same host intercept, the shape that must stay clean.
+    vi.useFakeTimers()
+    const reply = mode2031SequenceFor('dark')
+    const caretEcho = (data: string): string => data.replaceAll('\x1b', '^[')
+    const masterWrites: string[] = []
+    const emissions: PtyIngressEmission[] = []
+    let ingress!: PtyStartupIngress
+    ingress = new PtyStartupIngress({
+      ownerBackend: 'posix-pty',
+      write: (data) => {
+        masterWrites.push(data)
+        ingress.accept(caretEcho(data))
+      },
+      onEmission: (emission) => emissions.push(emission)
+    })
+    const hostWrite = (_id: string, data: string): void => {
+      if (extractOnlyCookedEchoSafeQueryReplies(data) && ingress.answerLiveQueryReply(data)) {
+        return
+      }
+      masterWrites.push(`RAW:${data}`)
+      ingress.accept(caretEcho(data))
+    }
+    const queue = createPtyInputWriteQueue({ isWritable: () => true, write: hostWrite })
+
+    expect(queue.enqueueQueryReply('pty-1', reply)).toBe(true)
+    await queue.waitForDrain()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(masterWrites).toEqual([reply])
+    expect(masterWrites.some((write) => write.startsWith('RAW:'))).toBe(false)
+
+    ingress.accept('Ok to proceed? (y) ')
+    const visible = emissions.map((emission) => emission.data).join('')
+    expect(visible).toBe('Ok to proceed? (y) ')
+    expect(visible).not.toContain('997;1n')
     ingress.drainAndClose()
     vi.useRealTimers()
   })

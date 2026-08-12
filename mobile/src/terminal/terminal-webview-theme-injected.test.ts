@@ -2,17 +2,20 @@ import { Script } from 'node:vm'
 import { parse } from 'acorn'
 import { describe, expect, it } from 'vitest'
 import { TERMINAL_WEBVIEW_THEME_JS } from './terminal-webview-theme-injected'
+import { TERMINAL_COLOR_SCHEME_PUSH_JS } from './terminal-webview-color-scheme-push-injected'
 
 const DARK_FLOOR = 3
 const LIGHT_FLOOR = 4.5
 
 // Eval the injected theme JS in a bare context so the declared helpers become
-// callable properties on it (mirrors terminal-webview-engine.test.ts).
+// callable properties on it (mirrors terminal-webview-engine.test.ts). The
+// color-scheme push gate ships in the same WebView IIFE, so load it too.
 function loadThemeInjected(extra: Record<string, unknown> = {}): Record<string, unknown> {
   const context: Record<string, unknown> = {
     defaultTheme: { background: '#1a1b26', foreground: '#c0caf5' },
     ...extra
   }
+  new Script(TERMINAL_COLOR_SCHEME_PUSH_JS).runInNewContext(context)
   new Script(TERMINAL_WEBVIEW_THEME_JS).runInNewContext(context)
   return context
 }

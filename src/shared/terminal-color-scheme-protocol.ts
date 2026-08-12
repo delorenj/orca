@@ -11,6 +11,11 @@ export function mode2031SequenceFor(mode: TerminalColorSchemeMode): string {
   return mode === 'dark' ? '\x1b[?997;1n' : '\x1b[?997;2n'
 }
 
+/** True for a color-scheme status report (`CSI ?997;1n` / `CSI ?997;2n`), either direction. */
+export function isMode2031ColorSchemeReport(data: string): boolean {
+  return data === mode2031SequenceFor('dark') || data === mode2031SequenceFor('light')
+}
+
 export function resolveTerminalColorSchemeMode(
   settings: Pick<GlobalSettings, 'theme'> | null | undefined,
   systemPrefersDark: boolean

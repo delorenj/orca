@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { ITheme } from '@xterm/xterm'
 import type { ManagedPane, PaneManager } from '@/lib/pane-manager/pane-manager'
 import { getDefaultSettings } from '../../../../shared/constants'
 import {
@@ -7,7 +8,12 @@ import {
   publishTerminalViewAttributesAtAppStart
 } from './terminal-appearance'
 import { maybePushMode2031Flip } from './terminal-mode-2031-replies'
+import {
+  isXtermColorSchemePushSuppressed,
+  shouldDropXtermColorSchemePush
+} from './xterm-theme-write-color-scheme-push'
 import { safeFit } from '@/lib/pane-manager/pane-fit'
+import { setFitOverride } from '@/lib/pane-manager/mobile-fit-overrides'
 import { mode2031SequenceFor } from '../../../../shared/terminal-color-scheme-protocol'
 import { _resetTerminalViewAttributesPublisherForTest } from './terminal-view-attributes-publisher'
 import type { TerminalViewAttributes } from '../../../../shared/terminal-view-attributes'
@@ -191,6 +197,159 @@ describe('applyTerminalAppearance theme assignment', () => {
     // Identity-stable theme means xterm never re-runs _setTheme, so a TUI's modifyColors mutation survives the font tweak.
     expect(pane.terminal.options.theme).toBe(firstTheme)
     expect(pane.terminal.options.fontSize).toBe(settings.terminalFontSize + 2)
+  })
+
+  it('writes options.theme inside the xterm color-scheme push suppression window', () => {
+    // #9993: the write makes xterm push its own CSI 997 at 2031 subscribers; maybePushMode2031Flip
+    // is the single owner of theme-flip notifications, so the emulator's copy must be droppable.
+    const pane = makePane(1)
+    const settings = getDefaultSettings('/tmp')
+    const suppressedDuringWrite: boolean[] = []
+    let stored: ITheme | undefined
+    Object.defineProperty(pane.terminal.options, 'theme', {
+      configurable: true,
+      enumerable: true,
+      get: () => stored,
+      set: (value: ITheme) => {
+        stored = value
+        suppressedDuringWrite.push(isXtermColorSchemePushSuppressed())
+      }
+    })
+
+    apply(pane, settings)
+
+    expect(suppressedDuringWrite).toEqual([true])
+    // The window closes with the write — a later xterm ?996n answer must still get through.
+    expect(isXtermColorSchemePushSuppressed()).toBe(false)
+  })
+
+  // Independent mirror of xterm's rule (relative luminance of background vs foreground) so the fake
+  // emulator never borrows the resolver under test. Handles the two shapes composeActiveTerminalTheme
+  // can produce for a slot: '#rrggbb' and 'rgba(r, g, b, a)'.
+  function crudeLuma(color: string | undefined): number {
+    if (!color) {
+      return 0
+    }
+    const rgba = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(color)
+    const [r, g, b] = rgba
+      ? [Number(rgba[1]), Number(rgba[2]), Number(rgba[3])]
+      : [
+          Number.parseInt(color.slice(1, 3), 16),
+          Number.parseInt(color.slice(3, 5), 16),
+          Number.parseInt(color.slice(5, 7), 16)
+        ]
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+
+  /**
+   * Stands in for the real emulator: xterm re-reports the color scheme on every options.theme write
+   * while a program has mode 2031 armed (CoreBrowserTerminal._reportColorScheme), and that report
+   * goes out over the pane's input path, which drops it via shouldDropXtermColorSchemePush. Without
+   * this wiring an appearance-layer test cannot see the emulator's copy at all, so a "single owner"
+   * assertion would hold trivially even with the suppression removed.
+   */
+  function attachXtermColorSchemeReport(
+    pane: ManagedPane,
+    transport: { sendInputImmediate: (data: string) => boolean }
+  ): void {
+    let stored: ITheme | undefined
+    Object.defineProperty(pane.terminal.options, 'theme', {
+      configurable: true,
+      enumerable: true,
+      get: () => stored,
+      set: (value: ITheme) => {
+        stored = value
+        const report = mode2031SequenceFor(
+          crudeLuma(value.background) < crudeLuma(value.foreground) ? 'dark' : 'light'
+        )
+        if (shouldDropXtermColorSchemePush(report)) {
+          return
+        }
+        transport.sendInputImmediate(report)
+      }
+    })
+  }
+
+  function makeSubscribedFlipHarness(options?: { ptyId?: string | null }) {
+    const pane = makePane(1)
+    const transport = {
+      ...fakeTransport(),
+      getPtyId: () => options?.ptyId ?? null,
+      resize: vi.fn()
+    }
+    attachXtermColorSchemeReport(pane, transport)
+    const paneTransports = new Map([[1, transport]])
+    const paneMode2031 = new Map([[1, true]])
+    const paneLastThemeMode = new Map<number, 'dark' | 'light'>()
+    const applyWith = (settings: ReturnType<typeof getDefaultSettings>): void => {
+      applyTerminalAppearance(
+        makeManager([pane]),
+        settings,
+        true,
+        new Map(),
+        paneTransports as never,
+        'false',
+        paneMode2031,
+        paneLastThemeMode
+      )
+    }
+    const sent = (): string[] => transport.sendInputImmediate.mock.calls.flat()
+    return { pane, transport, paneLastThemeMode, applyWith, sent }
+  }
+
+  it('pushes exactly one CSI 997 to a subscribed pane across a flip and its re-applies', () => {
+    // #9993 single-owner contract: the emulator's own report for the same write is dropped, so a
+    // real color-mode change yields one sequence and the font/opacity re-applies yield none.
+    const h = makeSubscribedFlipHarness()
+    const light = { ...getDefaultSettings('/tmp'), theme: 'light' as const }
+    h.applyWith(light)
+    h.transport.sendInputImmediate.mockClear()
+
+    h.applyWith({ ...light, theme: 'dark' })
+    h.applyWith({ ...light, theme: 'dark', terminalFontSize: light.terminalFontSize + 2 })
+    h.applyWith({ ...light, theme: 'dark', terminalCursorOpacity: 0.9 })
+
+    expect(h.sent()).toEqual([mode2031SequenceFor('dark')])
+    expect(h.paneLastThemeMode.get(1)).toBe('dark')
+  })
+
+  it('pushes a CSI 997 when only the palette flips luminance, with the app mode unchanged', () => {
+    // #9993: turning terminalUseSeparateLightTheme off under a light app theme swaps the light
+    // palette for the dark one while appearance.mode stays 'light'. The subscriber must still hear
+    // 'dark' — the byte describes the background it paints on, not the app chrome.
+    const h = makeSubscribedFlipHarness()
+    const lightPalette = {
+      ...getDefaultSettings('/tmp'),
+      theme: 'light' as const,
+      terminalUseSeparateLightTheme: true
+    }
+    h.applyWith(lightPalette)
+    expect(h.paneLastThemeMode.get(1)).toBe('light')
+    h.transport.sendInputImmediate.mockClear()
+
+    h.applyWith({ ...lightPalette, terminalUseSeparateLightTheme: false })
+
+    expect(h.sent()).toEqual([mode2031SequenceFor('dark')])
+    expect(h.paneLastThemeMode.get(1)).toBe('dark')
+  })
+
+  it('pushes to a pane holding a fit override, whose theme was rewritten all the same', () => {
+    // #9993: a mobile/remote-desktop fit hold withholds resize, not terminal reports. The theme
+    // write (and its xterm-report drop) is unconditional, so skipping the push here sends nothing.
+    setFitOverride('pty-held', 'mobile-fit', 40, 20)
+    try {
+      const h = makeSubscribedFlipHarness({ ptyId: 'pty-held' })
+      const light = { ...getDefaultSettings('/tmp'), theme: 'light' as const }
+      h.applyWith(light)
+      h.transport.sendInputImmediate.mockClear()
+
+      h.applyWith({ ...light, theme: 'dark' })
+
+      expect(h.sent()).toEqual([mode2031SequenceFor('dark')])
+      expect(h.transport.resize).not.toHaveBeenCalled()
+    } finally {
+      setFitOverride('pty-held', 'desktop-fit', 0, 0)
+    }
   })
 
   it('still assigns a fresh theme when composed values actually change', () => {
