@@ -198,6 +198,26 @@ describe('OpenCodeHookService buildPtyEnv / clearPty round-trip', () => {
     rmSync(join(userDataDir, 'opencode-config-overlays'), { recursive: true, force: true })
   })
 
+  it('preserves the native user config and creates no status overlay after hub cutover', () => {
+    const manifest = join(userDataDir, 'ownership.json')
+    writeFileSync(
+      manifest,
+      JSON.stringify({ version: 1, handler_ids: ['orca-status'], clis: ['opencode'] })
+    )
+    vi.stubEnv('BB_HOOK_OWNERSHIP', manifest)
+    try {
+      const service = new OpenCodeHookService()
+      expect(service.buildPtyEnv(daemonSessionId)).toEqual({})
+      expect(service.buildPtyEnv(daemonSessionId, '/existing/user/config')).toEqual({
+        OPENCODE_CONFIG_DIR: '/existing/user/config'
+      })
+      expect(existsSync(join(userDataDir, 'opencode-hooks'))).toBe(false)
+      expect(existsSync(join(userDataDir, 'opencode-config-overlays'))).toBe(false)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('writes a shared OPENCODE_CONFIG_DIR and installs the plugin file', () => {
     const service = new OpenCodeHookService()
     const env = service.buildPtyEnv(daemonSessionId)

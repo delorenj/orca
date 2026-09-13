@@ -383,7 +383,7 @@ export function getOpenCodeFamilyPluginSource(hookPathname: string): string {
     '}',
     '',
     'async function post(hookEventName, extraProperties) {',
-    '  if (hookHubOwnsStatus()) return true;',
+    `  if (${JSON.stringify(hookPathname)} === "/hook/opencode" && hookHubOwnsStatus()) return true;`,
     '  // Why: resolve coords per post — the endpoint file may have been',
     '  // rewritten by a newer Orca since the last call. Pane/tab/worktree IDs',
     '  // stay on process.env because they are per-PTY (stable for the life of',
