@@ -14,6 +14,7 @@ import { grokHookService } from '../grok/hook-service'
 import { hermesHookService } from '../hermes/hook-service'
 import { kimiHookService } from '../kimi/hook-service'
 import { openClaudeHookService } from '../openclaude/hook-service'
+import { externalHookOwnerStatus, remoteExternalHookOwners } from './external-hook-ownership'
 
 export type RemoteManagedHookInstallOptions = {
   /** Explicit CODEX_HOME dir for redirected runtimes (WSL managed runtime
@@ -83,6 +84,7 @@ export async function installRemoteManagedAgentHooks(
 ): Promise<AgentHookInstallStatus[]> {
   const results: AgentHookInstallStatus[] = []
   const allowedAgents = options?.agents ? new Set(options.agents) : null
+  const externalOwners = await remoteExternalHookOwners(sftp, remoteHome)
   for (const [agent, install] of REMOTE_MANAGED_HOOK_INSTALLERS) {
     if (allowedAgents && !allowedAgents.has(agent)) {
       continue
@@ -90,6 +92,10 @@ export async function installRemoteManagedAgentHooks(
     // Why: relay requests can disappear during reconnect; do not start more
     // user-config mutations after their client has gone away.
     options?.signal?.throwIfAborted()
+    if (externalOwners.agents.has(agent)) {
+      results.push(externalHookOwnerStatus(agent, externalOwners.path))
+      continue
+    }
     try {
       const result = await install(sftp, remoteHome, options)
       results.push(result)

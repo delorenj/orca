@@ -286,7 +286,9 @@ function getPluginInitSource(): string {
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
+from pathlib import Path
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Optional
@@ -425,9 +427,28 @@ def _payload_for_event(event_name: str, kwargs: dict[str, Any]) -> dict[str, Any
 
 def _make_hook(event_name: str) -> Callable[..., None]:
     def _hook(**kwargs: Any) -> None:
+        if _hook_hub_owns_status():
+            return
         _post_to_orca(_payload_for_event(event_name, kwargs))
 
     return _hook
+
+
+def _hook_hub_owns_status() -> bool:
+    if os.environ.get("BB_HOOK_HUB") == "off":
+        return False
+    checker = Path.home() / ".agents/hooks/hub/ownership.py"
+    if not checker.is_file():
+        return False
+    try:
+        spec = importlib.util.spec_from_file_location("orca_hook_ownership", checker)
+        if spec is None or spec.loader is None:
+            return False
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.owns("orca-status", "hermes")
+    except Exception:
+        return False
 
 
 def register(ctx: Any) -> None:
