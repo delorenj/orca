@@ -13,6 +13,7 @@ import {
 } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { mirrorEntry, safeRemoveTree } from '../pty/overlay-mirror'
+import { externalHookOwner } from '../agent-hooks/external-hook-ownership'
 
 const ORCA_OPENCODE_PLUGIN_FILE = 'orca-opencode-status.js'
 const OPENCODE_LEGACY_HOOKS_DIR = 'opencode-hooks'
@@ -42,6 +43,17 @@ export function getOpenCodePluginSource(): string {
 export function getOpenCodeFamilyPluginSource(hookPathname: string): string {
   // Why: the plugin posts PTY environment data from OpenCode to the shared hooks server.
   return [
+    'import { readFileSync as readHookOwnership } from "node:fs";',
+    'import { homedir as hookOwnershipHome } from "node:os";',
+    'import { join as hookOwnershipJoin } from "node:path";',
+    'function hookHubOwnsStatus() {',
+    '  if (process.env.BB_HOOK_HUB === "off") return false;',
+    '  try {',
+    '    const path = process.env.BB_HOOK_OWNERSHIP || hookOwnershipJoin(hookOwnershipHome(), ".config/33god/hook-hub/ownership.json");',
+    '    const owner = JSON.parse(readHookOwnership(path, "utf8"));',
+    '    return owner.version === 1 && owner.handler_ids?.includes("orca-status") && owner.clis?.includes("opencode");',
+    '  } catch { return false; }',
+    '}',
     '// Why: process-lifetime guard so a recurring parse error on a malformed',
     "// endpoint file does not spam OpenCode's stderr once per hook post.",
     '// This guard lives inside the plugin source because the plugin runs in',
@@ -371,6 +383,7 @@ export function getOpenCodeFamilyPluginSource(hookPathname: string): string {
     '}',
     '',
     'async function post(hookEventName, extraProperties) {',
+    '  if (hookHubOwnsStatus()) return true;',
     '  // Why: resolve coords per post — the endpoint file may have been',
     '  // rewritten by a newer Orca since the last call. Pane/tab/worktree IDs',
     '  // stay on process.env because they are per-PTY (stable for the life of',
@@ -1005,6 +1018,9 @@ export class OpenCodeHookService {
   }
 
   buildPtyEnv(ptyId: string, existingConfigDir?: string | undefined): Record<string, string> {
+    if (externalHookOwner('opencode')) {
+      return existingConfigDir ? { OPENCODE_CONFIG_DIR: existingConfigDir } : {}
+    }
     if (!isUsableId(ptyId)) {
       // Why: on a bad id, still preserve a user-set OPENCODE_CONFIG_DIR; only the Orca status plugin is forfeited.
       return existingConfigDir ? { OPENCODE_CONFIG_DIR: existingConfigDir } : {}
