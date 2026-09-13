@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as Ownership from './external-hook-ownership'
 
 const mocks = vi.hoisted(() => ({
   detect: vi.fn(),
@@ -9,7 +10,13 @@ const mocks = vi.hoisted(() => ({
   statusClaude: vi.fn(),
   statusCodex: vi.fn(),
   refreshClaude: vi.fn(),
-  refreshCodex: vi.fn()
+  refreshCodex: vi.fn(),
+  owner: vi.fn()
+}))
+
+vi.mock('./external-hook-ownership', async (importOriginal) => ({
+  ...(await importOriginal<typeof Ownership>()),
+  externalHookOwner: mocks.owner
 }))
 
 vi.mock('./local-agent-cli-presence', () => ({
@@ -53,12 +60,27 @@ function status(agent: 'claude' | 'codex', state: 'installed' | 'not_installed')
 describe('managed agent hook controls', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.owner.mockReturnValue(null)
     mocks.installClaude.mockReturnValue(status('claude', 'installed'))
     mocks.installCodex.mockReturnValue(status('codex', 'installed'))
     mocks.removeClaude.mockReturnValue(status('claude', 'not_installed'))
     mocks.removeCodex.mockReturnValue(status('codex', 'not_installed'))
     mocks.refreshClaude.mockResolvedValue(undefined)
     mocks.refreshCodex.mockResolvedValue(undefined)
+  })
+
+  it('does not refresh or reinstall a concern owned by the hook hub', async () => {
+    mocks.owner.mockImplementation((agent: string) => (agent === 'codex' ? '/owner.json' : null))
+    mocks.detect.mockResolvedValue({ claude: { state: 'found' }, codex: { state: 'found' } })
+    const results = await installManagedAgentHooks({ agentCmdOverrides: {} })
+    expect(mocks.installCodex).not.toHaveBeenCalled()
+    expect(mocks.refreshCodex).not.toHaveBeenCalled()
+    expect(mocks.installClaude).toHaveBeenCalledOnce()
+    expect(results[1]).toMatchObject({
+      agent: 'codex',
+      state: 'skipped',
+      configPath: '/owner.json'
+    })
   })
 
   it('installs only agents with positively detected CLIs', async () => {

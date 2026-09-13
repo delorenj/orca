@@ -6,6 +6,7 @@ import {
 import { normalizeDisabledTuiAgents } from '../../shared/tui-agent-selection'
 import type { GlobalSettings } from '../../shared/types'
 import { detectLocalManagedAgentCliPresence } from './local-agent-cli-presence'
+import { externalHookOwner, externalHookOwnerStatus } from './external-hook-ownership'
 import {
   MANAGED_AGENT_HOOK_INSTALLERS,
   MANAGED_AGENT_HOOK_REMOVERS,
@@ -76,6 +77,10 @@ function runInstaller(
 ): AgentHookInstallStatus {
   const [agent, install] = entry
   try {
+    const owner = externalHookOwner(agent)
+    if (owner) {
+      return externalHookOwnerStatus(agent, owner)
+    }
     return install()
   } catch (error) {
     console.error(`[agent-hooks] Failed to install ${agent} managed hooks:`, error)
@@ -96,6 +101,9 @@ async function refreshExistingManagedScripts(options: InstallOptions): Promise<v
   const allowed = options.agents ? new Set(options.agents) : null
   for (const [agent, refresh] of MANAGED_AGENT_HOOK_SCRIPT_REFRESHERS) {
     if (allowed !== null && !allowed.has(agent)) {
+      continue
+    }
+    if (externalHookOwner(agent)) {
       continue
     }
     try {
@@ -135,6 +143,11 @@ export async function installManagedAgentHooks(
   const results: AgentHookInstallStatus[] = []
   for (const entry of installers) {
     const [agent] = entry
+    const owner = externalHookOwner(agent)
+    if (owner) {
+      results.push(externalHookOwnerStatus(agent, owner))
+      continue
+    }
     if (disabled.has(agent)) {
       results.push(skippedStatus(agent, 'agent_disabled', 'Agent is disabled in Settings.'))
       continue
@@ -181,6 +194,10 @@ export function removeManagedAgentHooks(options: RemoveOptions = {}): AgentHookI
 export function getManagedAgentHookStatuses(): AgentHookInstallStatus[] {
   return MANAGED_AGENT_HOOK_STATUS_READERS.map(([agent, getStatus]) => {
     try {
+      const owner = externalHookOwner(agent)
+      if (owner) {
+        return externalHookOwnerStatus(agent, owner)
+      }
       return getStatus()
     } catch (error) {
       return errorStatus(agent, error)

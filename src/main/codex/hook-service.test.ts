@@ -44,6 +44,57 @@ vi.mock('os', async (importOriginal) => {
 
 import { CodexHookService } from './hook-service'
 
+it('mirrors native user hooks without installing Orca callbacks when the hub owns status', () => {
+  const ownership = join(tmpHome, 'ownership.json')
+  const systemHome = join(tmpHome, '.codex')
+  const runtimeHome = join(userDataDir, 'owned-runtime')
+  mkdirSync(systemHome, { recursive: true })
+  mkdirSync(runtimeHome, { recursive: true })
+  writeFileSync(
+    ownership,
+    JSON.stringify({ version: 1, clis: ['codex'], handler_ids: ['orca-status'] })
+  )
+  writeFileSync(
+    join(systemHome, 'hooks.json'),
+    JSON.stringify({
+      hooks: {
+        PostToolUse: [
+          {
+            matcher: '.*',
+            hooks: [
+              {
+                type: 'command',
+                command: '/home/test/.local/bin/bb-hook --cli codex --native PostToolUse',
+                timeout: 4
+              }
+            ]
+          }
+        ]
+      }
+    })
+  )
+  writeFileSync(join(systemHome, 'config.toml'), '[features]\nhooks = true\n')
+  const previous = process.env.BB_HOOK_OWNERSHIP
+  process.env.BB_HOOK_OWNERSHIP = ownership
+  try {
+    const status = new CodexHookService().install(runtimeHome)
+    expect(status).toMatchObject({ state: 'skipped', configPath: ownership })
+    const installed = JSON.parse(readFileSync(join(runtimeHome, 'hooks.json'), 'utf8'))
+    const commands = Object.values(installed.hooks).flatMap((groups) =>
+      (groups as { hooks: { command: string }[] }[]).flatMap((group) =>
+        group.hooks.map((hook) => hook.command)
+      )
+    )
+    expect(commands).toEqual(['/home/test/.local/bin/bb-hook --cli codex --native PostToolUse'])
+  } finally {
+    if (previous === undefined) {
+      delete process.env.BB_HOOK_OWNERSHIP
+    } else {
+      process.env.BB_HOOK_OWNERSHIP = previous
+    }
+  }
+})
+
 const WINDOWS_POWERSHELL_LAUNCHER =
   /^[A-Za-z]:\/[^"]*\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand \S+$/
 

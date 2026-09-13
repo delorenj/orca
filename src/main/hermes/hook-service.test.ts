@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { execFile, execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -46,6 +46,34 @@ describe('HermesHookService', () => {
       plugins: { enabled: string[] }
     }
     expect(config.plugins.enabled).toContain(_internals.HERMES_PLUGIN_NAME)
+  })
+
+  it('defers native callbacks to the hub while allowing a supervised hub child', () => {
+    const checkerDir = join(homeDir, '.agents', 'hooks', 'hub')
+    mkdirSync(checkerDir, { recursive: true })
+    writeFileSync(join(checkerDir, 'ownership.py'), 'def owns(handler, cli):\n    return True\n')
+    const plugin = join(homeDir, 'plugin.py')
+    writeFileSync(plugin, _internals.getPluginInitSource())
+    const probe = [
+      'import runpy,sys',
+      'ns=runpy.run_path(sys.argv[1])',
+      'fn=ns["_make_hook"]("on_session_start")',
+      'calls=[]',
+      'fn.__globals__["_post_to_orca"]=lambda payload: calls.append(payload)',
+      'fn(session_id="session-1")',
+      'print(len(calls))'
+    ].join('\n')
+    for (const [switchValue, expected] of [
+      ['', '0'],
+      ['off', '1']
+    ]) {
+      const result = spawnSync('python3', ['-c', probe, plugin], {
+        encoding: 'utf8',
+        env: { ...process.env, HOME: homeDir, BB_HOOK_HUB: switchValue }
+      })
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stdout.trim()).toBe(expected)
+    }
   })
 
   it('preserves other enabled plugins and removes Orca from disabled list', () => {

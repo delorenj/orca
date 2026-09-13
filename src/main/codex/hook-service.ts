@@ -1,3 +1,4 @@
+import { externalHookOwner, externalHookOwnerStatus } from '../agent-hooks/external-hook-ownership'
 /* eslint-disable max-lines -- Why: getStatus + install + remove all share the managed-command and trust-key derivation. Splitting would hide that the three operations must agree on group index, event label, and command bytes. */
 import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { join, win32 as pathWin32 } from 'node:path'
@@ -1262,6 +1263,11 @@ export class CodexHookService {
   // account launching against its own self-contained CODEX_HOME passes that
   // per-account home so hooks.json/config.toml/trust land where codex reads.
   install(runtimeHomePath: string = getOrcaManagedCodexHomePath()): AgentHookInstallStatus {
+    const owner = externalHookOwner('codex')
+    if (owner) {
+      const refreshed = this.refreshRuntimeUserHooks(runtimeHomePath)
+      return refreshed.state === 'error' ? refreshed : externalHookOwnerStatus('codex', owner)
+    }
     const configPath = getConfigPath(runtimeHomePath)
     const scriptPath = getManagedScriptPath()
     // Why: must run before this install rewrites hooks.json/config.toml —
